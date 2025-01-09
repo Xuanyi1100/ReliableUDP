@@ -3,7 +3,7 @@
 	From "Networking for Game Programmers" - http://www.gaffer.org/networking-for-game-programmers
 	Author: Glenn Fiedler <gaffer@gaffer.org>
 */
-
+#pragma warning(suppress : 4996) 
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -132,6 +132,7 @@ int main( int argc, char * argv[] )
 	if ( argc >= 2 )
 	{
 		int a,b,c,d;
+#pragma warning(suppress : 4996) 
 		if ( sscanf( argv[1], "%d.%d.%d.%d", &a, &b, &c, &d ) )
 		{
 			mode = Client;
