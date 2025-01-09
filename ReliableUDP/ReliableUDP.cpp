@@ -202,22 +202,27 @@ int main( int argc, char * argv[] )
 		// send and receive packets
 		
 		sendAccumulator += DeltaTime;
+		static int packetCounter = 1;
+		while (sendAccumulator > 1.0f / sendRate)
+			 {
+			 unsigned char packet[PacketSize];
+			 memset(packet, 0, sizeof(packet));
+						// Prepare the message: "Hello World <<N>>"
+				 snprintf((char*)packet, PacketSize, "Hello World <<%d>>", packetCounter);
+			 packetCounter++;
+			 connection.SendPacket(packet, strlen((char*)packet) + 1);
+			 sendAccumulator -= 1.0f / sendRate;
+			 }
 		
-		while ( sendAccumulator > 1.0f / sendRate )
-		{
-			unsigned char packet[PacketSize];
-			memset( packet, 0, sizeof( packet ) );
-			connection.SendPacket( packet, sizeof( packet ) );
-			sendAccumulator -= 1.0f / sendRate;
-		}
-		
-		while ( true )
-		{
-			unsigned char packet[256];
-			int bytes_read = connection.ReceivePacket( packet, sizeof(packet) );
-			if ( bytes_read == 0 )
-				break;
-		}
+			while (true)
+		 {
+			 unsigned char packet[256];
+			 int bytes_read = connection.ReceivePacket(packet, sizeof(packet));
+			if (bytes_read == 0)
+				 break;
+						// Print the received packet content using printf
+			 printf("Received packet: %s\n", packet);
+			 }
 		
 		// show packets that were acked this frame
 		
