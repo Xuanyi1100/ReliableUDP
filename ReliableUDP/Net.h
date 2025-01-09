@@ -15,7 +15,8 @@
 #define PLATFORM_WINDOWS  1
 #define PLATFORM_MAC      2
 #define PLATFORM_UNIX     3
-#define PacketSizeHack   384
+const int PacketSizeHack = 384;
+
 
 #if defined(_WIN32)
 #define PLATFORM PLATFORM_WINDOWS
@@ -69,11 +70,13 @@ namespace net
 #endif
 
 	// internet address
-
+	
+	
 	class Address
 	{
 	public:
-	
+		
+
 		Address()
 		{
 			address = 0;
@@ -155,7 +158,7 @@ namespace net
 	{
 		#if PLATFORM == PLATFORM_WINDOWS
 	    WSADATA WsaData;
-		return WSAStartup( MAKEWORD(2,2), &WsaData ) != NO_ERROR;
+		return WSAStartup( MAKEWORD(2,2), &WsaData ) == NO_ERROR;
 		#else
 		return true;
 		#endif
