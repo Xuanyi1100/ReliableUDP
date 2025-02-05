@@ -6,47 +6,46 @@ FileTransmitter::FileTransmitter()
 	totalChunks = 0;
 	sender = true;
 }
-int FileTransmitter::Initialize(const string& filePath, bool isSender)
+int FileTransmitter::InitializeSender(const string& filePath)
 {
-	if (sender)
-	{
+	// set file name
+	fileName = filesystem::path(filePath).filename().string();
+
+		// open the file 
 		inputFile.open(filePath, ios::binary | ios::ate);
 		if (!inputFile)
 		{
 			cerr << "Error opening file for reading: " << filePath << std::endl;
 			return -1;
 		}
-		int fileSize = inputFile.tellg();
 
+		fileSize = inputFile.tellg();
 		totalChunks = (fileSize + 255) / 256;
+
+		// Calculate CRC32 of the file
+		inputFile.seekg(0, ios::beg);
+		char data[FileDataChunkSize] = { 0 };
+		while (inputFile.good())
+		{
+			inputFile.read(data, FileDataChunkSize);
+			crc = CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32(), crc);
+		}
+		// go back to the start of the file
 		inputFile.seekg(0, ios::beg);
 
-		// Calculate CRC32
-		uint32_t fileCRC;
-		//= CRC::Calculate(fileData.data(), fileData.size(), CRC::CRC_32());
-
-	}
-	else
-	{
-		outputFile.open(filePath, std::ios::binary);
-		if (!outputFile)
-		{
-			std::cerr << "Error opening file for writing: " << filePath << std::endl;
-			return -1;
-		}
-	}
+	//else // receiver 
+	//{
+	//	// TODO:
+	//	outputFile.open(filePath, std::ios::binary);
+	//	if (!outputFile)
+	//	{
+	//		std::cerr << "Error opening file for writing: " << filePath << std::endl;
+	//		return -1;
+	//	}
+	//}
 	return 0;
 }
-uint32_t FileTransmitter::calculateFileCRC(fstream fs)
-{
-	char data[FileDataChunkSize] = { 0 };
-	while (fs.read(data,FileDataChunkSize))
-	{
-		CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32())
 
-	}
-
-}
 void FileTransmitter::read()
 {
 

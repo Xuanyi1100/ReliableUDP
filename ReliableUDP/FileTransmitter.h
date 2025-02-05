@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <filesystem>
 #include <vector>
 #include "CRC.h"
 using namespace std;
@@ -37,17 +38,18 @@ private:
     ifstream inputFile;
     ofstream outputFile;
     string fileName;
+    int fileSize;
     int totalChunks;
     bool sender;
     uint32_t crc;
 
-    uint32_t calculateFileCRC(string fileName);
+    void calculateFileCRC(ifstream fs);
 
 public:
 
     FileTransmitter();
     ~FileTransmitter();
-    int Initialize(const string& filePath, bool isSender);
+    int InitializeSender(const string& filePath);
 
     bool ReadNextChunk(std::vector<char>& buffer, int& chunkIndex);
     void WriteChunk(const std::vector<char>& buffer, int chunkIndex);
