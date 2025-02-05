@@ -7,6 +7,7 @@ FileTransmitter::FileTransmitter()
 	sender = true;
 	ms = {};
 	fc = {};
+	buffer[FileDataChunkSize] = { 0 };
 }
 FileTransmitter::~FileTransmitter()
 {
@@ -23,33 +24,33 @@ int FileTransmitter::InitializeSender(const string& filePath)
 {
 	// set file name
 	fileName = filesystem::path(filePath).filename().string();
-	if (fileName.length() > MaxFileNameLength -1)
+	if (fileName.length() > MaxFileNameLength - 1)
 	{
 		cerr << "Error: File name out of length limit: " << filePath << endl;
 		return -1;
 	}
-		// open the file 
-		inputFile.open(filePath, ios::binary | ios::ate);
-		if (!inputFile)
-		{
-			cerr << "Error opening file for reading: " << filePath << endl;
-			return -1;
-		}
+	// open the file 
+	inputFile.open(filePath, ios::binary | ios::ate);
+	if (!inputFile)
+	{
+		cerr << "Error opening file for reading: " << filePath << endl;
+		return -1;
+	}
 
-		fileSize = inputFile.tellg();
-		totalChunks = (fileSize + 255) / 256;
-		ackOfChunks.resize(totalChunks, false);
+	fileSize = inputFile.tellg();
+	totalChunks = (fileSize + 255) / 256;
+	ackOfChunks.resize(totalChunks, false);
 
-		// Calculate CRC32 of the file
-		inputFile.seekg(0, ios::beg);
-		char data[FileDataChunkSize] = { 0 };
-		while (inputFile.good())
-		{
-			inputFile.read(data, FileDataChunkSize);
-			crc = CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32(), crc);
-		}
-		// go back to the start of the file
-		inputFile.seekg(0, ios::beg);
+	// Calculate CRC32 of the file
+	inputFile.seekg(0, ios::beg);
+	char data[FileDataChunkSize] = { 0 };
+	while (inputFile.good())
+	{
+		inputFile.read(data, FileDataChunkSize);
+		crc = CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32(), crc);
+	}
+	// go back to the start of the file
+	inputFile.seekg(0, ios::beg);
 
 	//else // receiver 
 	//{
@@ -78,12 +79,7 @@ bool FileTransmitter::PackMetaData(unsigned char packet[PacketSize])
 	metadata.totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
 	metadata.crc32 = crc;
 
-	ms.id = MDID;
-	memcpy(ms.content, &metadata, sizeof(FileMetadata));
-	// clear the packet
-	memset(packet, 0, PacketSize);
-
-	memcpy(packet,&ms,PacketSize);
+	packMessage(packet, MDID, &metadata,sizeof(metadata));
 	return true;
 }
 
@@ -94,7 +90,6 @@ bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
 		cerr << "Error file not open: " << fileName << endl;
 		return false;
 	}
-	char buffer[FileDataChunkSize] = { 0 };
 	inputFile.read(buffer, FileDataChunkSize);
 	if (inputFile)
 	{
@@ -103,11 +98,7 @@ bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
 		fc.chunkIndex = chunkIndex;
 		// sendTimes[chunkIndex] = (float)clock() / CLOCKS_PER_SEC; // 记录发送时间
 		// chunkIndex++;
-		ms.id = FCID;
-		memset(ms.content, 0, ContentSize);
-		memcpy(ms.content, &fc, ContentSize);
-		memset(packet, 0, PacketSize);
-		memcpy(packet, &ms, PacketSize);
+		packMessage(packet, FCID, &fc, sizeof(fc));
 	}
 	if (inputFile.eof())
 	{
@@ -126,42 +117,26 @@ string FileTransmitter::GetFileName() const
 	return fileName;
 }
 
+void FileTransmitter::WriteChunk(const std::vector<char>& buffer, int chunkIndex)
+{
+	if (outputFile)
+	{
+		outputFile.seekp(chunkIndex * 256);
+		outputFile.write(buffer.data(), buffer.size());
+	}
+}
+
+void FileTransmitter::packMessage(unsigned char packet[PacketSize],
+	unsigned char id, const void* content, size_t size)
+{
+	ms.id = id;
+	memset(ms.content, 0, ContentSize);
+	memcpy(ms.content, content, size);
+	memset(packet, 0, PacketSize);
+	memcpy(packet, &ms, PacketSize);
+}
 void FileTransmitter::read()
 {
-
-	std::vector<unsigned char> fileData(fileSize);
-	ifs.read(reinterpret_cast<char*>(fileData.data()), fileSize);
-
-
-	// Calculate CRC32
-	uint32_t fileCRC = CRC::Calculate(fileData.data(), fileData.size(), CRC::CRC_32());
-
-	
-	// Send metadata
-
-	// TODO: serialize metadata
-
-	connection.SendPacket(reinterpret_cast<unsigned char*>(&metadata), sizeof(metadata));
-
-	// Splits file into chunks and sends them
-	for (uint32_t i = 0; i < metadata.totalChunks; i++) {
-		FileChunk chunk;
-		chunk.chunkIndex = i;
-		size_t offset = i * FileDataChunkSize; // offset for fileData
-		size_t chunkSize = (((FileDataChunkSize) < (fileSize - offset)) ? (FileDataChunkSize) : (fileSize - offset))
-			;
-
-		// Copy from memory buffer instead of re-reading file
-		memcpy(chunk.data, fileData.data() + offset, chunkSize);
-
-		// Fill remaining space with zeros if needed
-		if (chunkSize < FileDataChunkSize) {
-			memset(chunk.data + chunkSize, 0, FileDataChunkSize - chunkSize);
-		}
-
-		connection.SendPacket(reinterpret_cast<unsigned char*>(&chunk), sizeof(chunk));
-	}
-
 	// Wait for all acks with timeout
 	// ????
 	// 

@@ -47,11 +47,14 @@ namespace udpft
         bool sender;
         uint32_t crc;
         FileChunk fc;
+        char buffer[FileDataChunkSize];
         Message ms;
         uint32_t chunkIndex; // where to set it?
         vector<bool> ackOfChunks;
         // map<int, float> sendTimes;
 
+        inline void packMessage(unsigned char packet[PacketSize], 
+            unsigned char id, const void* content, size_t size);
     public:
 
         FileTransmitter();
@@ -65,9 +68,7 @@ namespace udpft
         uint32_t GetTotalChunks();
         uint32_t GetChunkIndex();
 
-        void PackMessage(uint32_t id, unsigned char content[]);
-
-
+   
 
         // load a file from disk
 
