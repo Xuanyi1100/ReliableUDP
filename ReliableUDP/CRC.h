@@ -34,7 +34,6 @@ namespace CRC {
         }
     };
 
-    // Add free function AFTER class definition
     inline uint32_t Calculate(const void* data, size_t length, CRC_32) {
         return CRC_32::Calculate(data, length);
     }
