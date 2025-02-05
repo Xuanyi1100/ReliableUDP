@@ -1,5 +1,5 @@
 #include "FileTransmitter.h"
-
+using namespace udpft;
 FileTransmitter::FileTransmitter()
 {
 	crc = 0;
@@ -10,7 +10,11 @@ int FileTransmitter::InitializeSender(const string& filePath)
 {
 	// set file name
 	fileName = filesystem::path(filePath).filename().string();
-
+	if (fileName.length() > MaxFileNameLength -1)
+	{
+		cerr << "Error: File name out of length limit: " << filePath << std::endl;
+		return -1;
+	}
 		// open the file 
 		inputFile.open(filePath, ios::binary | ios::ate);
 		if (!inputFile)
@@ -45,7 +49,28 @@ int FileTransmitter::InitializeSender(const string& filePath)
 	//}
 	return 0;
 }
+bool FileTransmitter::PackMetaData(unsigned char packet[], int size)
+{
+	if (size > PacketSize)
+	{
+		return false;
+	}
+	// Prepare metadata
+	FileMetadata metadata = {};
+	Message ms = {};
+	strncpy(metadata.fileName, fileName.c_str(), MaxFileNameLength - 1);
+	metadata.fileName[MaxFileNameLength - 1] = '\0';
+	metadata.fileSize = fileSize;
+	metadata.totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
+	metadata.crc32 = crc;
 
+	ms.id = MDID;
+	memcpy(ms.content, &metadata, sizeof(FileMetadata));
+	// clear the packet
+	memset(packet, 0, size);
+	memcpy(packet,&ms,size);
+	return true;
+}
 void FileTransmitter::read()
 {
 
@@ -71,16 +96,7 @@ void FileTransmitter::read()
 	// Calculate CRC32
 	uint32_t fileCRC = CRC::Calculate(fileData.data(), fileData.size(), CRC::CRC_32());
 
-	// Prepare metadata
-	FileMetadata metadata;
-	const char* filename = strrchr(filePath.c_str(), '\\');
-	filename = filename ? filename + 1 : filePath.c_str();
-	strncpy(metadata.fileName, filename, MaxFileNameLength - 1);
-	metadata.fileName[MaxFileNameLength - 1] = '\0';
-	metadata.fileSize = fileSize;
-	metadata.totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
-	metadata.crc32 = fileCRC;
-
+	
 	// Send metadata
 
 	// TODO: serialize metadata

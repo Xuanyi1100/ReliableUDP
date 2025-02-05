@@ -6,76 +6,81 @@
 #include <vector>
 #include "CRC.h"
 using namespace std;
-
-const int PacketSize = 256;
-const int MaxFileNameLength = 128;
-const int ContentSize = PacketSize - sizeof(unsigned char);
-const int FileDataChunkSize = PacketSize - sizeof(uint32_t) - sizeof(unsigned char);
+namespace udpft
+{
+    const int PacketSize = 256;
+    const int MaxFileNameLength = 128;
+    const int ContentSize = PacketSize - sizeof(unsigned char);
+    const int FileDataChunkSize = PacketSize - sizeof(uint32_t) - sizeof(unsigned char);
+    const unsigned char MDID = 0x01;
+    const unsigned char FCID = 0x02;
+    const unsigned char ENDID = 0x03; 
 
 #pragma pack(push, 1) // for serialize structs
-struct FileMetadata {
-	char fileName[MaxFileNameLength];
-	uint32_t fileSize;
-	uint32_t totalChunks;
-	uint32_t crc32;
-};
+    struct FileMetadata {
+        char fileName[MaxFileNameLength];
+        uint32_t fileSize;
+        uint32_t totalChunks;
+        uint32_t crc32;
+    };
 
-struct FileChunk {
-	uint32_t chunkIndex;
-	unsigned char data[FileDataChunkSize];
-};
+    struct FileChunk {
+        uint32_t chunkIndex;
+        unsigned char data[FileDataChunkSize];
+    };
 
-struct Message {
-	unsigned char id;
-	unsigned char content[ContentSize];
-};
+    struct Message {
+        unsigned char id;
+        unsigned char content[ContentSize];
+    };
 #pragma pack(pop)
 
-class FileTransmitter {
+    class FileTransmitter {
 
-private:
+    private:
 
-    ifstream inputFile;
-    ofstream outputFile;
-    string fileName;
-    int fileSize;
-    int totalChunks;
-    bool sender;
-    uint32_t crc;
+        ifstream inputFile;
+        ofstream outputFile;
+        string fileName;
+        int fileSize;
+        int totalChunks;
+        bool sender;
+        uint32_t crc;
 
-    void calculateFileCRC(ifstream fs);
+        void calculateFileCRC(ifstream fs);
 
-public:
+    public:
 
-    FileTransmitter();
-    ~FileTransmitter();
-    int InitializeSender(const string& filePath);
+        FileTransmitter();
+        ~FileTransmitter();
+        int InitializeSender(const string& filePath);
+        bool PackMetaData(unsigned char packet[], int size);
+        bool ReadChunk(std::vector<char>& buffer, int& chunkIndex);
+        void WriteChunk(const std::vector<char>& buffer, int chunkIndex);
+        bool IsEOF() const;
+        string GetFileName() const;
 
-    bool ReadNextChunk(std::vector<char>& buffer, int& chunkIndex);
-    void WriteChunk(const std::vector<char>& buffer, int chunkIndex);
-    bool IsEOF() const;
-    string GetFileName() const;
+        void PackMessage(uint32_t id, unsigned char content[]);
 
-    void PackMessage(uint32_t id, unsigned char content[]);
-    
 
-    
-    // load a file from disk
 
-    //for sending the file
-    // get the metadata of the file
-    // metadata: file name, file size, checksum, number of chunks
-    // serialize and deserialize metadata.
-    // break the File into chunks
+        // load a file from disk
 
-    //for receiving the file
-    // parse and validate the metadata packet.
-    // receive the File Pieces and append each chunk to the correct file.
-    // verify integrity after all chunks have been received:
-    // compute the checksum/hash of the received file and compare it with the checksum in the metadata.
-    // If the checksum doesn’t match, report an error and request the file again.
-    // save the file to disk
+        //for sending the file
+        // get the metadata of the file
+        // metadata: file name, file size, checksum, number of chunks
+        // serialize and deserialize metadata.
+        // break the File into chunks
 
-        // serialize the metadata
+        //for receiving the file
+        // parse and validate the metadata packet.
+        // receive the File Pieces and append each chunk to the correct file.
+        // verify integrity after all chunks have been received:
+        // compute the checksum/hash of the received file and compare it with the checksum in the metadata.
+        // If the checksum doesn’t match, report an error and request the file again.
+        // save the file to disk
 
-};
+            // serialize the metadata
+
+    };
+}
