@@ -9,8 +9,8 @@ using namespace std;
 
 const int PacketSize = 256;
 const int MaxFileNameLength = 128;
-const int ContentSize = PacketSize -sizeof(uint32_t);
-const int FileDataChunkSize = PacketSize - 2 * sizeof(uint32_t);
+const int ContentSize = PacketSize - sizeof(unsigned char);
+const int FileDataChunkSize = PacketSize - sizeof(uint32_t) - sizeof(unsigned char);
 
 #pragma pack(push, 1) // for serialize structs
 struct FileMetadata {
@@ -25,8 +25,8 @@ struct FileChunk {
 	unsigned char data[FileDataChunkSize];
 };
 
-struct MESSAGE {
-	uint32_t id;
+struct Message {
+	unsigned char id;
 	unsigned char content[ContentSize];
 };
 #pragma pack(pop)
