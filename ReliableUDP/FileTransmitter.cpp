@@ -5,6 +5,19 @@ FileTransmitter::FileTransmitter()
 	crc = 0;
 	totalChunks = 0;
 	sender = true;
+	ms = {};
+	fc = {};
+}
+FileTransmitter::~FileTransmitter()
+{
+	if (inputFile.is_open())
+	{
+		inputFile.close();
+	}
+	if (outputFile.is_open())
+	{
+		outputFile.close();
+	}
 }
 int FileTransmitter::InitializeSender(const string& filePath)
 {
@@ -12,19 +25,20 @@ int FileTransmitter::InitializeSender(const string& filePath)
 	fileName = filesystem::path(filePath).filename().string();
 	if (fileName.length() > MaxFileNameLength -1)
 	{
-		cerr << "Error: File name out of length limit: " << filePath << std::endl;
+		cerr << "Error: File name out of length limit: " << filePath << endl;
 		return -1;
 	}
 		// open the file 
 		inputFile.open(filePath, ios::binary | ios::ate);
 		if (!inputFile)
 		{
-			cerr << "Error opening file for reading: " << filePath << std::endl;
+			cerr << "Error opening file for reading: " << filePath << endl;
 			return -1;
 		}
 
 		fileSize = inputFile.tellg();
 		totalChunks = (fileSize + 255) / 256;
+		ackOfChunks.resize(totalChunks, false);
 
 		// Calculate CRC32 of the file
 		inputFile.seekg(0, ios::beg);
@@ -49,15 +63,15 @@ int FileTransmitter::InitializeSender(const string& filePath)
 	//}
 	return 0;
 }
-bool FileTransmitter::PackMetaData(unsigned char packet[], int size)
+
+/*
+* copy metadata to a Message with ID 0.
+* Pack the Message into the packet.
+*/
+bool FileTransmitter::PackMetaData(unsigned char packet[PacketSize])
 {
-	if (size > PacketSize)
-	{
-		return false;
-	}
 	// Prepare metadata
 	FileMetadata metadata = {};
-	Message ms = {};
 	strncpy(metadata.fileName, fileName.c_str(), MaxFileNameLength - 1);
 	metadata.fileName[MaxFileNameLength - 1] = '\0';
 	metadata.fileSize = fileSize;
@@ -67,31 +81,57 @@ bool FileTransmitter::PackMetaData(unsigned char packet[], int size)
 	ms.id = MDID;
 	memcpy(ms.content, &metadata, sizeof(FileMetadata));
 	// clear the packet
-	memset(packet, 0, size);
-	memcpy(packet,&ms,size);
+	memset(packet, 0, PacketSize);
+
+	memcpy(packet,&ms,PacketSize);
 	return true;
 }
+
+bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
+{
+	if (!inputFile.is_open())
+	{
+		cerr << "Error file not open: " << fileName << endl;
+		return false;
+	}
+	char buffer[FileDataChunkSize] = { 0 };
+	inputFile.read(buffer, FileDataChunkSize);
+	if (inputFile)
+	{
+		memset(fc.data, 0, FileDataChunkSize);
+		memcpy(fc.data, buffer, FileDataChunkSize);
+		fc.chunkIndex = chunkIndex;
+		// sendTimes[chunkIndex] = (float)clock() / CLOCKS_PER_SEC; // 记录发送时间
+		// chunkIndex++;
+		ms.id = FCID;
+		memset(ms.content, 0, ContentSize);
+		memcpy(ms.content, &fc, ContentSize);
+		memset(packet, 0, PacketSize);
+		memcpy(packet, &ms, PacketSize);
+	}
+	if (inputFile.eof())
+	{
+		cout << "Reached end of file after reading" << endl;
+	}
+	return inputFile.good();
+}
+
+bool FileTransmitter::IsEOF() const
+{
+	return inputFile.eof();
+}
+
+string FileTransmitter::GetFileName() const
+{
+	return fileName;
+}
+
 void FileTransmitter::read()
 {
 
-
-
-	// Read file contents
-	std::ifstream ifs(filePath, std::ios::binary | std::ios::ate);
-	if (!ifs.is_open()) {
-		printf("Error opening file: %s\n", filePath.c_str());
-		return 1;
-	}
-
-	uint32_t fileSize = ifs.tellg();
-	if (fileSize <= 0) {
-		printf("Error getting file size: %s\n", filePath.c_str());
-		return 1;
-	}
-	ifs.seekg(0);
 	std::vector<unsigned char> fileData(fileSize);
 	ifs.read(reinterpret_cast<char*>(fileData.data()), fileSize);
-	ifs.close();
+
 
 	// Calculate CRC32
 	uint32_t fileCRC = CRC::Calculate(fileData.data(), fileData.size(), CRC::CRC_32());

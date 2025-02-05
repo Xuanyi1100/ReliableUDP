@@ -46,19 +46,24 @@ namespace udpft
         int totalChunks;
         bool sender;
         uint32_t crc;
-
-        void calculateFileCRC(ifstream fs);
+        FileChunk fc;
+        Message ms;
+        uint32_t chunkIndex; // where to set it?
+        vector<bool> ackOfChunks;
+        // map<int, float> sendTimes;
 
     public:
 
         FileTransmitter();
         ~FileTransmitter();
         int InitializeSender(const string& filePath);
-        bool PackMetaData(unsigned char packet[], int size);
-        bool ReadChunk(std::vector<char>& buffer, int& chunkIndex);
+        bool PackMetaData(unsigned char packet[PacketSize]);
+        bool ReadChunk(unsigned char packet[PacketSize]);
         void WriteChunk(const std::vector<char>& buffer, int chunkIndex);
         bool IsEOF() const;
         string GetFileName() const;
+        uint32_t GetTotalChunks();
+        uint32_t GetChunkIndex();
 
         void PackMessage(uint32_t id, unsigned char content[]);
 
