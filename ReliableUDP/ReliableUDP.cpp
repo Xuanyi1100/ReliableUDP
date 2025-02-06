@@ -246,11 +246,11 @@ int main(int argc, char* argv[])
 		while (sendAccumulator > 1.0f / sendRate)
 		{
 			unsigned char packet[PacketSize];
-			if (isSender)
+			if (isSender) // unnecessary??
 			{
 				switch (ftm.GetState()) //
 				{
-				case READY:
+				case HOLD:
 					ftm.PackMetaData(packet);
 					break;
 				case SENDING:
@@ -275,7 +275,7 @@ int main(int argc, char* argv[])
 			sendAccumulator -= 1.0f / sendRate;
 		}
 
-		while (true)
+		while (true) // receiving a packet
 		{
 			// in the server mode, receive packets of the file 
 			// invoke methods in the filetransmitter to save the file back to listening state after having verified the file
@@ -283,6 +283,17 @@ int main(int argc, char* argv[])
 			int bytes_read = connection.ReceivePacket(packet, sizeof(packet));
 			if (bytes_read == 0)
 				break;
+			ftm.ProcessPacket(packet);
+			switch (ftm.GetState()) //
+			{
+			case READY:
+				
+				break;
+			case RECEIVING:
+
+				break;
+			}
+
 			
 			// verify the file after receiving the EOF packet
 			// save the file and go back to listening state if the file integrity is verified
@@ -334,8 +345,7 @@ int main(int argc, char* argv[])
 
 		net::wait(DeltaTime);
 	}
-
+	ftm.Close();
 	ShutdownSockets();
-
 	return 0;
 }

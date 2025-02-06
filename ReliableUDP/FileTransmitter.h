@@ -11,16 +11,26 @@ namespace udpft
 {
     const int PacketSize = 256;
     const int MaxFileNameLength = 128;
-    const int ContentSize = PacketSize - sizeof(unsigned char);
-    const int FileDataChunkSize = PacketSize - sizeof(uint32_t) - sizeof(unsigned char);
-    const unsigned char MDID = 0x01;
-    const unsigned char FCID = 0x02;
-    const unsigned char ENDID = 0x03; 
+    const int ContentSize = PacketSize - sizeof(uint32_t);
+    const int FileDataChunkSize = PacketSize - 2 * sizeof(uint32_t);
+    // Signal
+    const char END[] = "EOF"; // message ID == 3
+    const char ACK[] = "ACK"; // Message ID ==  4
+
+    // ID for different types of message 
+    const uint32_t MDID = 1;
+    const uint32_t FCID = 2;
+    const uint32_t ENDID = 3;
 
 	enum State {
-		ERROR = 0,
-		READY,
+		CRACKED = 0,
+        // for a sender:
+        HOLD,
 		SENDING,
+
+        // for a receiver 
+        READY,
+        RECEIVING,
 	};
 
 #pragma pack(push, 1) // for serialize structs
@@ -37,7 +47,7 @@ namespace udpft
     };
 
     struct Message {
-        unsigned char id;
+        uint32_t id;
         unsigned char content[ContentSize];
     };
 #pragma pack(pop)
@@ -48,7 +58,8 @@ namespace udpft
 
         ifstream inputFile;
         ofstream outputFile;
-        vector<bool> ackOfChunks;
+        vector<bool> chunkReceived; // for the receiver, check if a chunk is received and written.
+        // vector<bool> ackOfChunks;
 
         State state;
         bool sender;
@@ -64,22 +75,22 @@ namespace udpft
         // map<int, float> sendTimes;
 
         inline void packMessage(unsigned char packet[PacketSize], 
-            unsigned char id, const void* content, size_t size);
+            uint32_t id, const void* content, size_t size);
     public:
 
         FileTransmitter();
         ~FileTransmitter();
         int Initialize(const string& filePath, bool isSender);
+        void Close();
         void PackMetaData(unsigned char packet[PacketSize]);
         bool ReadChunk(unsigned char packet[PacketSize]);
-        void WriteChunk(const std::vector<char>& buffer, int chunkIndex);
+        void PackEOF(unsigned char packet[PacketSize]);
         bool IsEOF() const;
         string GetFileName() const;
         State GetState() const;
         uint32_t GetTotalChunks();
         uint32_t GetChunkIndex();
-        void Unpack(unsigned char packet[PacketSize]);
-        void ParseMessage();
+        void ProcessPacket(unsigned char packet[PacketSize]);
 
         // serialize and deserialize metadata.
         // break the File into chunks

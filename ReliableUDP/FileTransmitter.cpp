@@ -4,7 +4,7 @@ FileTransmitter::FileTransmitter()
 {
 	sender = false;
 
-	state = ERROR;
+	state = CRACKED;
 	fileSize = 0;
 	crc = 0;
 	totalChunks = 0;
@@ -43,7 +43,7 @@ int FileTransmitter::Initialize(const string& filePath, bool isSender)
 
 		fileSize = inputFile.tellg();
 		totalChunks = (fileSize + 255) / 256;
-		ackOfChunks.assign(totalChunks, false);
+		// ackOfChunks.assign(totalChunks, false);
 
 		// Calculate CRC32 of the file
 		inputFile.seekg(0, ios::beg);
@@ -55,19 +55,12 @@ int FileTransmitter::Initialize(const string& filePath, bool isSender)
 		}
 		// go back to the start of the file
 		inputFile.seekg(0, ios::beg);
+		state = HOLD;
 	}
 	else // receiver 
 	{
-
-	//	// TODO:
-	//	outputFile.open(filePath, std::ios::binary);
-	//	if (!outputFile)
-	//	{
-	//		std::cerr << "Error opening file for writing: " << filePath << std::endl;
-	//		return -1;
-	//	}
+		state = READY;
 	}
-	state = READY;
 	return 0;
 }
 
@@ -90,6 +83,8 @@ void FileTransmitter::PackMetaData(unsigned char packet[PacketSize])
 
 bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
 {
+	//TODO: implement resent logic.
+
 	FileChunk fc = {};
 	if (!inputFile.is_open())
 	{
@@ -128,48 +123,83 @@ State FileTransmitter::GetState() const
 	return state; 
 }
 
-void FileTransmitter::WriteChunk(const std::vector<char>& buffer, int chunkIndex)
+void FileTransmitter::PackEOF(unsigned char packet[PacketSize])
 {
-	if (outputFile)
-	{
-		outputFile.seekp(chunkIndex * 256);
-		outputFile.write(buffer.data(), buffer.size());
-	}
+	packMessage(packet, ENDID, END, sizeof(END));
 }
 
 void FileTransmitter::packMessage(unsigned char packet[PacketSize],
-	unsigned char id, const void* content, size_t size)
+	uint32_t id, const void* content, size_t size)
 {
 	Message ms = {};
 	ms.id = id;
 	memset(ms.content, 0, ContentSize);
 	memcpy(ms.content, content, size);
 	memset(packet, 0, PacketSize);
-	memcpy(packet, &ms, PacketSize);
+	memcpy(packet, &ms, sizeof(ms));
 }
 
-void FileTransmitter::Unpack(unsigned char packet[PacketSize])
+void FileTransmitter::ProcessPacket(unsigned char packet[PacketSize])
 {
-	unsigned char id = packet[0];
-	switch (id)
+	Message ms = {};
+	memcpy(&ms, packet, sizeof(ms));
+	switch (ms.id)
 	{
 	case MDID: // parse metadata
-		FileMetadata fm = { 0 };
-		// deserialize packet to FileMetadata
-		memcpy(&fm, packet+1, sizeof(fm));
-		fileName = fm.fileName;
-		fileSize = fm.fileSize;
-		totalChunks = fm.totalChunks;
-		crc = fm.crc32;
+		if (!sender && state == READY)
+		{
+			FileMetadata fm = { 0 };
+			// deserialize packet to FileMetadata
+			memcpy(&fm, ms.content, sizeof(fm));
+			fileName = fm.fileName;
+			fileSize = fm.fileSize;
+			totalChunks = fm.totalChunks;
+			crc = fm.crc32;
+			chunkReceived.assign(totalChunks,false);
 
+			outputFile.open(fileName, std::ios::binary);
+			if (outputFile.is_open())
+			{
+				std::cerr << "Error opening file for writing: " << fileName << std::endl;
+				state = CRACKED;
+				return;
+			}	
+			state = RECEIVING;
+		}
 		break;
-	case FCID:
+
+	case FCID: // file chunk, write file data
+		if (!sender && state == RECEIVING)
+		{
+			FileChunk fc = {};
+			// deserialize packet to 
+			memcpy(&fc, ms.content, sizeof(fc));
+			chunkIndex = fc.chunkIndex;
+			// write to file
+			if (!chunkReceived[chunkIndex] && outputFile.good() )
+			{
+				outputFile.seekp(chunkIndex * FileDataChunkSize);
+				outputFile.write((char*)fc.data, FileDataChunkSize);
+				chunkReceived[chunkIndex] = true;
+				// to sent an ack with chunkIndex.
+			}
+			if (!outputFile.good())
+			{
+				state = CRACKED;
+			}
+		}
 		break;
 
 	case ENDID:
+
 		break;
 
 	}
+	// 1.if all the element in chunkReceived == true, and receivd an END message, then 
+	//	 close file and calculate CRC.
+	//   1.1 result CRC is equal to crc. then switch back to ready state, waiting for the next file.
+	//	 1.2 not equal to CRC, sent a request to resend the file.
+	// 2. not all true :
 }
 void FileTransmitter::read()
 {
