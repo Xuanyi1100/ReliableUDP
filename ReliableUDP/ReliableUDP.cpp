@@ -16,6 +16,7 @@
 
 using namespace std;
 using namespace net;
+using namespace udpft;
 
 const int ServerPort = 30000;
 const int ClientPort = 30001;
@@ -188,6 +189,13 @@ int main(int argc, char* argv[])
 	float statsAccumulator = 0.0f;
 
 	FlowControl flowControl;
+	FileTransmitter ftm;
+
+	bool isSender = (mode == Client);
+	if (ftm.Initialize(filePath, isSender) != 0)
+	{
+		return 1;
+	}
 
 	while (true)
 	{
@@ -237,11 +245,23 @@ int main(int argc, char* argv[])
 		// send packets at a fixed rate
 		while (sendAccumulator > 1.0f / sendRate)
 		{
-			// invoke the method in the file transmitter
-			// send file chunks sequentially
-			// stop sending when all chunks have been sent and no more data is available
 			unsigned char packet[PacketSize];
-			memset(packet, 0, sizeof(packet));
+			if (isSender)
+			{
+				switch (ftm.GetState()) //
+				{
+				case READY:
+					ftm.PackMetaData(packet);
+					break;
+				case SENDING:
+					ftm.ReadChunk(packet);
+				}
+				
+			}
+			else  
+			{
+
+			}
 			// In the CLIENT mode
 			// 
 			// 1. Specify the type of the packet (Message ID) and contents
@@ -250,9 +270,8 @@ int main(int argc, char* argv[])
 			// 3. contents for the packets containing the file chunks
 			//  get the file chunks from the file transmitter and put them into the packet to send
 			// 4. contents for the packets indicating the end of the file
-			snprintf((char*)packet, sizeof(packet), "Hello World <<%d>>", sentCount);
+
 			connection.SendPacket(packet, sizeof(packet));
-			++sentCount;
 			sendAccumulator -= 1.0f / sendRate;
 		}
 
@@ -264,7 +283,7 @@ int main(int argc, char* argv[])
 			int bytes_read = connection.ReceivePacket(packet, sizeof(packet));
 			if (bytes_read == 0)
 				break;
-			printf("%s\n", packet);
+			
 			// verify the file after receiving the EOF packet
 			// save the file and go back to listening state if the file integrity is verified
 		}

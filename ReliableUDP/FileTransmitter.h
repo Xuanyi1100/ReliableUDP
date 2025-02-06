@@ -6,6 +6,7 @@
 #include <vector>
 #include "CRC.h"
 using namespace std;
+
 namespace udpft
 {
     const int PacketSize = 256;
@@ -15,6 +16,12 @@ namespace udpft
     const unsigned char MDID = 0x01;
     const unsigned char FCID = 0x02;
     const unsigned char ENDID = 0x03; 
+
+	enum State {
+		ERROR = 0,
+		READY,
+		SENDING,
+	};
 
 #pragma pack(push, 1) // for serialize structs
     struct FileMetadata {
@@ -41,16 +48,19 @@ namespace udpft
 
         ifstream inputFile;
         ofstream outputFile;
+        vector<bool> ackOfChunks;
+
+        State state;
+        bool sender;
+
         string fileName;
         int fileSize;
         int totalChunks;
-        bool sender;
         uint32_t crc;
-        FileChunk fc;
-        char buffer[FileDataChunkSize];
-        Message ms;
+
         uint32_t chunkIndex; // where to set it?
-        vector<bool> ackOfChunks;
+        
+        
         // map<int, float> sendTimes;
 
         inline void packMessage(unsigned char packet[PacketSize], 
@@ -59,22 +69,18 @@ namespace udpft
 
         FileTransmitter();
         ~FileTransmitter();
-        int InitializeSender(const string& filePath);
-        bool PackMetaData(unsigned char packet[PacketSize]);
+        int Initialize(const string& filePath, bool isSender);
+        void PackMetaData(unsigned char packet[PacketSize]);
         bool ReadChunk(unsigned char packet[PacketSize]);
         void WriteChunk(const std::vector<char>& buffer, int chunkIndex);
         bool IsEOF() const;
         string GetFileName() const;
+        State GetState() const;
         uint32_t GetTotalChunks();
         uint32_t GetChunkIndex();
+        void Unpack(unsigned char packet[PacketSize]);
+        void ParseMessage();
 
-   
-
-        // load a file from disk
-
-        //for sending the file
-        // get the metadata of the file
-        // metadata: file name, file size, checksum, number of chunks
         // serialize and deserialize metadata.
         // break the File into chunks
 
