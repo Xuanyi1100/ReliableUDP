@@ -2,13 +2,14 @@
 using namespace udpft;
 FileTransmitter::FileTransmitter()
 {
+	rcMs = {};
 	sender = false;
-
 	state = CRACKED;
 	fileSize = 0;
 	crc = 0;
 	totalChunks = 0;
 	fileName = "default";
+	chunkReceived.clear();
 }
 FileTransmitter::~FileTransmitter()
 {
@@ -43,7 +44,7 @@ int FileTransmitter::Initialize(const string& filePath, bool isSender)
 
 		fileSize = inputFile.tellg();
 		totalChunks = (fileSize + 255) / 256;
-		// ackOfChunks.assign(totalChunks, false);
+		ackOfChunks.assign(totalChunks, false);
 
 		// Calculate CRC32 of the file
 		inputFile.seekg(0, ios::beg);
@@ -59,6 +60,13 @@ int FileTransmitter::Initialize(const string& filePath, bool isSender)
 	}
 	else // receiver 
 	{
+		rcMs = {};
+		fileSize = 0;
+		crc = 0;
+		totalChunks = 0;
+		fileName = filePath;
+		chunkReceived.clear();
+
 		state = READY;
 	}
 	return 0;
@@ -125,7 +133,8 @@ State FileTransmitter::GetState() const
 
 void FileTransmitter::PackEOF(unsigned char packet[PacketSize])
 {
-	packMessage(packet, ENDID, END, sizeof(END));
+	// Content: ENDID and file.  
+	packMessage(packet, ENDID, &crc, sizeof(crc));
 }
 
 void FileTransmitter::packMessage(unsigned char packet[PacketSize],
@@ -141,16 +150,22 @@ void FileTransmitter::packMessage(unsigned char packet[PacketSize],
 
 void FileTransmitter::ProcessPacket(unsigned char packet[PacketSize])
 {
-	Message ms = {};
-	memcpy(&ms, packet, sizeof(ms));
-	switch (ms.id)
+	memset(&rcMs, 0, sizeof(rcMs));
+	memcpy(&rcMs, packet, sizeof(rcMs));
+}
+
+void FileTransmitter::Update()
+{
+	switch (rcMs.id)
 	{
 	case MDID: // parse metadata
 		if (!sender && state == READY)
 		{
 			FileMetadata fm = { 0 };
 			// deserialize packet to FileMetadata
-			memcpy(&fm, ms.content, sizeof(fm));
+			memcpy(&fm, rcMs.content, sizeof(fm));
+
+			// store metadata, open output file and start to receive the file.
 			fileName = fm.fileName;
 			fileSize = fm.fileSize;
 			totalChunks = fm.totalChunks;
@@ -172,10 +187,11 @@ void FileTransmitter::ProcessPacket(unsigned char packet[PacketSize])
 		if (!sender && state == RECEIVING)
 		{
 			FileChunk fc = {};
-			// deserialize packet to 
-			memcpy(&fc, ms.content, sizeof(fc));
+			// deserialize packet 
+			memcpy(&fc, rcMs.content, sizeof(fc));
 			chunkIndex = fc.chunkIndex;
 			// write to file
+			// don't write data having been already written
 			if (!chunkReceived[chunkIndex] && outputFile.good() )
 			{
 				outputFile.seekp(chunkIndex * FileDataChunkSize);
@@ -191,15 +207,63 @@ void FileTransmitter::ProcessPacket(unsigned char packet[PacketSize])
 		break;
 
 	case ENDID:
+		if (!sender && state == RECEIVING && chunkReceived.back())
+		{
+			outputFile.close();
+			state = CHECKING;
+
+			// checke crc
+			inputFile.open(fileName, ios::binary);
+			if (!inputFile)
+			{
+				cerr << "Error opening file for computing CRC: " << fileName << endl;
+				state = CRACKED;
+				return;
+			}
+			uint32_t endCRC = 0;
+			calculateFileCRC(inputFile,endCRC);
+			if (endCRC != crc)
+			{
+				// 1.2 not equal to CRC, sent a request to resend the file.
+				return;
+			}
+			
+			state = DISCONNECTING;	
+			// record current time 
+			disconnectTime = clock();
+		}
+		break;
+
+	default:
 
 		break;
+		// for the receiver 
+		if (state = DISCONNECTING)
+		{
+			// back to ready after being in disconnecting state for 1s
+			double duration = double(clock() - disconnectTime) / CLOCKS_PER_SEC;
+			if (duration > 1)
+			{
+				Initialize("",false);
+			}
+		}
+
 
 	}
 	// 1.if all the element in chunkReceived == true, and receivd an END message, then 
 	//	 close file and calculate CRC.
 	//   1.1 result CRC is equal to crc. then switch back to ready state, waiting for the next file.
-	//	 1.2 not equal to CRC, sent a request to resend the file.
+	//	 
 	// 2. not all true :
+}
+void FileTransmitter::calculateFileCRC(ifstream& ifs, uint32_t& crc)
+{
+	char data[FileDataChunkSize] = { 0 };
+	while (ifs.good())
+	{
+		ifs.read(data, FileDataChunkSize);
+		crc = CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32(), crc);
+	}
 }
 void FileTransmitter::read()
 {

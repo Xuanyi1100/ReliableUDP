@@ -14,23 +14,23 @@ namespace udpft
     const int ContentSize = PacketSize - sizeof(uint32_t);
     const int FileDataChunkSize = PacketSize - 2 * sizeof(uint32_t);
     // Signal
-    const char END[] = "EOF"; // message ID == 3
-    const char ACK[] = "ACK"; // Message ID ==  4
 
     // ID for different types of message 
     const uint32_t MDID = 1;
     const uint32_t FCID = 2;
     const uint32_t ENDID = 3;
 
-	enum State {
-		CRACKED = 0,
+    enum State {
+        CRACKED = 0,
         // for a sender:
         HOLD,
-		SENDING,
-
+        SENDING,
+        // CLOSING,
         // for a receiver 
         READY,
         RECEIVING,
+        CHECKING,
+        DISCONNECTING,
 	};
 
 #pragma pack(push, 1) // for serialize structs
@@ -58,8 +58,10 @@ namespace udpft
 
         ifstream inputFile;
         ofstream outputFile;
+
         vector<bool> chunkReceived; // for the receiver, check if a chunk is received and written.
-        // vector<bool> ackOfChunks;
+        vector<bool> ackOfChunks; // for receiver check if received a file chunk ack.
+        Message rcMs;
 
         State state;
         bool sender;
@@ -70,10 +72,10 @@ namespace udpft
         uint32_t crc;
 
         uint32_t chunkIndex; // where to set it?
-        
+        clock_t disconnectTime;
         
         // map<int, float> sendTimes;
-
+        inline void calculateFileCRC(ifstream& ifs, uint32_t& crc);
         inline void packMessage(unsigned char packet[PacketSize], 
             uint32_t id, const void* content, size_t size);
     public:
@@ -91,6 +93,7 @@ namespace udpft
         uint32_t GetTotalChunks();
         uint32_t GetChunkIndex();
         void ProcessPacket(unsigned char packet[PacketSize]);
+        void Update();
 
         // serialize and deserialize metadata.
         // break the File into chunks
