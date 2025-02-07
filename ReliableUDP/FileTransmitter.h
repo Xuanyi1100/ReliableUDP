@@ -66,6 +66,7 @@ namespace udpft
         vector<bool> chunkReceived; // for the receiver, check if a chunk is received and written.
         vector<bool> ackOfChunks; // for the sender, check if received a file chunk ack.
         Message rcMs;      // store the received message.
+        FileChunk fc;
 
         State state; 
         bool sender;
@@ -78,7 +79,7 @@ namespace udpft
 
         /*************/
 
-        uint32_t chunkIndex; // for reading or writing a file chunk
+        uint32_t chunkIndex;                // for sending or writing a file chunk
         clock_t disconnectTime;
         
         // map<int, float> sendTimes;

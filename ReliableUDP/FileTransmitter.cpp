@@ -81,13 +81,19 @@ void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
 		case SENDING:	
 			if (inputFile.eof())
 			{
-				// Content: ENDID 
+				// ENDID 
 				packMessage(packet, ENDID, &crc, sizeof(crc));
+			}
+			else if (ackOfChunks[chunkIndex])
+			{
+				// FCID ,read nextchunk
+				++chunkIndex;
+				ReadChunk(packet);
 			}
 			else
 			{
-				//FCID
-				ReadChunk(packet);
+				// FCID				
+				packMessage(packet, FCID, &fc, sizeof(fc));
 			}
 			break;
 		case CRACKED:
@@ -101,14 +107,17 @@ void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
 		switch (state)
 		{
 		case READY:
+			// OKID
 			// OK for receving file chunks.
 			packMessage(packet, OKID, &crc, sizeof(crc));
 			break;
 		case RECEIVING:
+			// ACKID
 			// ACK for a chunk
 			packMessage(packet, ACKID, &chunkIndex, sizeof(chunkIndex));
 			break;
 		case DISCONNECTING:
+			// DISID
 			packMessage(packet, DISID, &crc, sizeof(crc));
 			break;
 		case CRACKED:
@@ -139,21 +148,24 @@ bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
 {
 	// TODO: implement resent logic.
 	// reduce file reading time for resending.
-	FileChunk fc = {};
 	if (!inputFile.is_open())
 	{
 		cerr << "Error file not open: " << fileName << endl;
 		return false;
-	}
+	}	
 	char buffer[FileDataChunkSize];
 	inputFile.read(buffer, FileDataChunkSize);
 	if (inputFile)
 	{
+		// handle the last file chunk.
+		//size_t bytesRead = inputFile.gcount();
+		//if (bytesRead > 0) {
+		//	std::cout << " read last " << bytesRead << " bytes" << std::endl;
+		//}
+		// the last byte represents the number of valid bytes in the last chunk.
 		memset(fc.data, 0, FileDataChunkSize);
 		memcpy(fc.data, buffer, FileDataChunkSize);
 		fc.chunkIndex = chunkIndex;
-
-		// chunkIndex++;
 		packMessage(packet, FCID, &fc, sizeof(fc));
 	}
 	if (inputFile.eof())
@@ -161,11 +173,6 @@ bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
 		cout << "Reached end of file after reading" << endl;
 	}
 	return inputFile.good();
-}
-
-bool FileTransmitter::IsEOF() const
-{
-	return inputFile.eof();
 }
 
 string FileTransmitter::GetFileName() const
@@ -193,7 +200,7 @@ void FileTransmitter::Update()
 		double duration = double(clock() - disconnectTime) / CLOCKS_PER_SEC;
 		if (duration > 1)
 		{
-			Initialize("", false);
+			Initialize("default", false);
 		}
 	}
 	switch (rcMs.id)
@@ -254,12 +261,28 @@ void FileTransmitter::Update()
 		}
 
 	case OKID:
+		if (state == WAVING)
+		{
 
+		}
 		break;
 	case ACKID:
+		if (state == SENDING)
+		{
+			// read the index in the message.
+			uint32_t ackedChunkIndex = 0;
+			memcpy(&ackedChunkIndex, rcMs.content, sizeof(ackedChunkIndex));
+			if (ackedChunkIndex == chunkIndex)
+			{
+				ackOfChunks[chunkIndex] = true;
+			}
+		}
 		break;
 	case DISID:
-
+		if (state == SENDING && ackOfChunks[chunkIndex])
+		{
+			;
+		}
 		break;
 	default:
 		break;
@@ -309,8 +332,8 @@ void FileTransmitter::storeMetadata()
 }
 void FileTransmitter::writeChunk()
 {
-	FileChunk fc = {};
-	// deserialize packet 
+	// deserialize packet
+	memset(&fc, 0, sizeof(fc));
 	memcpy(&fc, rcMs.content, sizeof(fc));
 	chunkIndex = fc.chunkIndex;
 	// write to file
