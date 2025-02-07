@@ -1,6 +1,6 @@
-#include "FileTransmitter.h"
+#include "FileTeleporter.h"
 using namespace udpft;
-FileTransmitter::FileTransmitter()
+FileTeleporter::FileTeleporter()
 {
 	rcMs = {};
 	sender = false;
@@ -11,11 +11,11 @@ FileTransmitter::FileTransmitter()
 	fileName = "default";
 	chunkReceived.clear();
 }
-FileTransmitter::~FileTransmitter()
+FileTeleporter::~FileTeleporter()
 {
 	Close();
 }
-void FileTransmitter::Close()
+void FileTeleporter::Close()
 {
 	if (inputFile.is_open())
 	{
@@ -29,7 +29,7 @@ void FileTransmitter::Close()
 	chunkReceived.clear();
 }
 // return 0 
-int FileTransmitter::Initialize(const string& filePath, bool isSender)
+int FileTeleporter::Initialize(const string& filePath, bool isSender)
 {
 	sender = isSender;
 	if (sender)
@@ -70,7 +70,7 @@ int FileTransmitter::Initialize(const string& filePath, bool isSender)
 	return 0;
 }
 
-void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
+void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 {
 	if (sender) 
 	{
@@ -78,7 +78,7 @@ void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
 		{
 		case WAVING:
 			// MDID
-			PackMetaData(packet);
+			packMetaData(packet);
 			break;
 		case SENDING:	
 			if (inputFile.eof())
@@ -90,7 +90,7 @@ void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
 			{
 				// FCID ,read nextchunk
 				++chunkIndex;
-				ReadChunk(packet);
+				readChunk(packet);
 			}
 			else
 			{
@@ -133,7 +133,7 @@ void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
 * copy metadata to a Message with ID 0.
 * Pack the Message into the packet.
 */
-void FileTransmitter::PackMetaData(unsigned char packet[PacketSize])
+void FileTeleporter::packMetaData(unsigned char packet[PacketSize])
 {
 	// Prepare metadata
 	FileMetadata metadata = {};
@@ -146,14 +146,13 @@ void FileTransmitter::PackMetaData(unsigned char packet[PacketSize])
 	packMessage(packet, MDID, &metadata,sizeof(metadata));
 }
 
-bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
+void FileTeleporter::readChunk(unsigned char packet[PacketSize])
 {
-	// TODO: implement resent logic.
-	// reduce file reading time for resending.
 	if (!inputFile.is_open())
 	{
 		cerr << "Error file not open: " << fileName << endl;
-		return false;
+		state = CRACKED;
+		return;
 	}	
 	char buffer[FileDataChunkSize];
 	inputFile.read(buffer, FileDataChunkSize);
@@ -174,26 +173,30 @@ bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
 	{
 		cout << "Reached end of file after reading" << endl;
 	}
-	return inputFile.good();
+	if (!inputFile.good())
+	{
+		cerr << "Error reading file Chunk: " << fileName << endl;
+		state = CRACKED;
+	}
 }
 
-string FileTransmitter::GetFileName() const
+string FileTeleporter::GetFileName() const
 {
 	return fileName;
 }
-State FileTransmitter::GetState() const
+State FileTeleporter::GetState() const
 {
 	return state; 
 }
 
 
-void FileTransmitter::ProcessPacket(unsigned char packet[PacketSize])
+void FileTeleporter::ProcessPacket(unsigned char packet[PacketSize])
 {
 	memset(&rcMs, 0, sizeof(rcMs));
 	memcpy(&rcMs, packet, sizeof(rcMs));
 }
 // call update after received a new message
-void FileTransmitter::Update()
+void FileTeleporter::Update()
 {
 	if (state == CRACKED) return;
 	/***************** File Receiver *****************/
@@ -295,7 +298,7 @@ void FileTransmitter::Update()
 	}
 }
 
-void FileTransmitter::calculateFileCRC(ifstream& ifs, uint32_t& crc)
+void FileTeleporter::calculateFileCRC(ifstream& ifs, uint32_t& crc)
 {
 	char data[FileDataChunkSize] = { 0 };
 	while (ifs.good())
@@ -304,7 +307,7 @@ void FileTransmitter::calculateFileCRC(ifstream& ifs, uint32_t& crc)
 		crc = CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32(), crc);
 	}
 }
-void FileTransmitter::openFileForWriting()
+void FileTeleporter::openFileForWriting()
 {
 	outputFile.open(fileName, std::ios::binary);
 	if (outputFile.is_open())
@@ -313,7 +316,7 @@ void FileTransmitter::openFileForWriting()
 		state = CRACKED;
 	}
 }
-void FileTransmitter::packMessage(unsigned char packet[PacketSize],
+void FileTeleporter::packMessage(unsigned char packet[PacketSize],
 	uint32_t id, const void* content, size_t size)
 {
 	Message ms = {};
@@ -323,7 +326,7 @@ void FileTransmitter::packMessage(unsigned char packet[PacketSize],
 	memset(packet, 0, PacketSize);
 	memcpy(packet, &ms, sizeof(ms));
 }
-void FileTransmitter::storeMetadata()
+void FileTeleporter::storeMetadata()
 {
 	FileMetadata fm = {};
 	// deserialize packet to FileMetadata
@@ -336,7 +339,7 @@ void FileTransmitter::storeMetadata()
 	crc = fm.crc32;
 	chunkReceived.assign(totalChunks, false);
 }
-void FileTransmitter::writeChunk()
+void FileTeleporter::writeChunk()
 {
 	// deserialize packet
 	memset(&fc, 0, sizeof(fc));
@@ -353,10 +356,11 @@ void FileTransmitter::writeChunk()
 	}
 	if (!outputFile.good())
 	{
+		cerr << "Error writing file chunk: " << fileName << endl;
 		state = CRACKED;
 	}
 }
-void FileTransmitter::read()
+void FileTeleporter::read()
 {
 	// Wait for all acks with timeout
 	// ????
@@ -370,8 +374,8 @@ void FileTransmitter::read()
 	//}
 
 	// Calculate actual transfer time
-	auto endTime = std::chrono::high_resolution_clock::now();
-	float transferTime = std::chrono::duration<float>(endTime - startTime).count();
+	auto endTime = chrono::high_resolution_clock::now();
+	float transferTime = chrono::duration<float>(endTime - startTime).count();
 
 	// Calculate speed in Mbps (1 megabit = 1,000,000 bits)
 	float fileSizeBits = fileSize * 8.0f;

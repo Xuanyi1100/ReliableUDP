@@ -56,7 +56,7 @@ namespace udpft
     };
 #pragma pack(pop)
 
-    class FileTransmitter {
+    class FileTeleporter {
 
     private:
 
@@ -82,26 +82,24 @@ namespace udpft
         uint32_t chunkIndex;                // for sending or writing a file chunk
         clock_t disconnectTime;
         
-        // map<int, float> sendTimes;
+        
         inline void calculateFileCRC(ifstream& ifs, uint32_t& crc);
+        inline void openFileForWriting();
         inline void packMessage(unsigned char packet[PacketSize], 
             uint32_t id, const void* content, size_t size);
-        inline void openFileForWriting();
-        void writeChunk();
+        void packMetaData(unsigned char packet[PacketSize]);
+        void readChunk(unsigned char packet[PacketSize]);
         void storeMetadata();
+        void writeChunk();
     public:
 
-        FileTransmitter();
-        ~FileTransmitter();
+        FileTeleporter();
+        ~FileTeleporter();
         int Initialize(const string& filePath, bool isSender);
         void Close();
         void LoadPacket(unsigned char packet[PacketSize]);
-        void PackMetaData(unsigned char packet[PacketSize]);
-        bool ReadChunk(unsigned char packet[PacketSize]);
         string GetFileName() const;
         State GetState() const;
-        uint32_t GetTotalChunks();
-        uint32_t GetChunkIndex();
         void ProcessPacket(unsigned char packet[PacketSize]);
         void Update();
 

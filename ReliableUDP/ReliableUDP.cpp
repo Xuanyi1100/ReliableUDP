@@ -12,7 +12,7 @@
 #include <numeric>
 #include "Net.h"
 
-#include "FileTransmitter.h"
+#include "FileTeleporter.h"
 
 using namespace std;
 using namespace net;
@@ -189,7 +189,7 @@ int main(int argc, char* argv[])
 	float statsAccumulator = 0.0f;
 
 	FlowControl flowControl;
-	FileTransmitter ftm;
+	FileTeleporter ftm;
 
 	bool isSender = (mode == Client);
 	if (ftm.Initialize(filePath, isSender) != 0)
