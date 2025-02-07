@@ -13,6 +13,10 @@ FileTransmitter::FileTransmitter()
 }
 FileTransmitter::~FileTransmitter()
 {
+	Close();
+}
+void FileTransmitter::Close()
+{
 	if (inputFile.is_open())
 	{
 		inputFile.close();
@@ -21,6 +25,8 @@ FileTransmitter::~FileTransmitter()
 	{
 		outputFile.close();
 	}
+	ackOfChunks.clear();
+	chunkReceived.clear();
 }
 // return 0 
 int FileTransmitter::Initialize(const string& filePath, bool isSender)
@@ -45,13 +51,9 @@ int FileTransmitter::Initialize(const string& filePath, bool isSender)
 
 		fileSize = inputFile.tellg();
 		totalChunks = (fileSize + 255) / 256;
-		ackOfChunks.assign(totalChunks, false);
-
 		// Calculate CRC32 of the file
 		inputFile.seekg(0, ios::beg);
 		calculateFileCRC(inputFile,crc);
-		// go back to the start of the file
-		inputFile.seekg(0, ios::beg);
 		state = WAVING;
 	}
 	else // receiver 
@@ -194,6 +196,7 @@ void FileTransmitter::ProcessPacket(unsigned char packet[PacketSize])
 void FileTransmitter::Update()
 {
 	if (state == CRACKED) return;
+	/***************** File Receiver *****************/
 	if (state = DISCONNECTING)
 	{
 		// back to ready after being in disconnecting state for 1s
@@ -259,11 +262,14 @@ void FileTransmitter::Update()
 				disconnectTime = clock();
 			}
 		}
-
+	/********************* File SENDER ***************/
 	case OKID:
 		if (state == WAVING)
 		{
-
+			// go back to the start of the file
+			inputFile.seekg(0, ios::beg);
+			ackOfChunks.assign(totalChunks, false);
+			state = SENDING;
 		}
 		break;
 	case ACKID:
@@ -279,9 +285,9 @@ void FileTransmitter::Update()
 		}
 		break;
 	case DISID:
-		if (state == SENDING && ackOfChunks[chunkIndex])
+		if (state == SENDING && ackOfChunks.back())
 		{
-			;
+			Close();
 		}
 		break;
 	default:
