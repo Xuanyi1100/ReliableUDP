@@ -246,22 +246,7 @@ int main(int argc, char* argv[])
 		while (sendAccumulator > 1.0f / sendRate)
 		{
 			unsigned char packet[PacketSize];
-			if (isSender) // unnecessary??
-			{
-				switch (ftm.GetState()) //
-				{
-				case HOLD:
-					ftm.PackMetaData(packet);
-					break;
-				case SENDING:
-					ftm.ReadChunk(packet);
-				}
-				
-			}
-			else  
-			{
-
-			}
+			ftm.LoadPacket(packet);
 			// In the CLIENT mode
 			// 
 			// 1. Specify the type of the packet (Message ID) and contents

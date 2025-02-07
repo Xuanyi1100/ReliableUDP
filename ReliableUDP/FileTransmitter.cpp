@@ -22,6 +22,7 @@ FileTransmitter::~FileTransmitter()
 		outputFile.close();
 	}
 }
+// return 0 
 int FileTransmitter::Initialize(const string& filePath, bool isSender)
 {
 	sender = isSender;
@@ -56,7 +57,7 @@ int FileTransmitter::Initialize(const string& filePath, bool isSender)
 		}
 		// go back to the start of the file
 		inputFile.seekg(0, ios::beg);
-		state = HOLD;
+		state = WAVING;
 	}
 	else // receiver 
 	{
@@ -67,11 +68,53 @@ int FileTransmitter::Initialize(const string& filePath, bool isSender)
 		fileName = filePath;
 		chunkReceived.clear();
 
-		state = READY;
+		state = LISTENING;
 	}
 	return 0;
 }
 
+void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
+{
+	if (sender) 
+	{
+		switch (state) //
+		{
+		case WAVING:
+			// MDID
+			PackMetaData(packet);
+			break;
+		case SENDING:	
+			if (inputFile.eof())
+			{
+				// Content: ENDID 
+				packMessage(packet, ENDID, NULL, 0);
+			}
+			else
+			{
+				//FCID
+				ReadChunk(packet);
+			}
+			break;
+		}
+	}
+	else
+	{
+		switch (state)
+		{
+		case READY:
+			// OK for receving file chunks.
+			packMessage(packet, OKID, NULL, 0);
+			break;
+		case RECEIVING:
+			// ACK for a chunk
+			packMessage(packet, ACKID, &chunkIndex, sizeof(chunkIndex));
+			break;
+		case DISCONNECTING:
+			packMessage(packet, DISID, &crc, sizeof(crc));
+			break;
+		}
+	}
+}
 /*
 * copy metadata to a Message with ID 0.
 * Pack the Message into the packet.
@@ -91,8 +134,8 @@ void FileTransmitter::PackMetaData(unsigned char packet[PacketSize])
 
 bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
 {
-	//TODO: implement resent logic.
-
+	// TODO: implement resent logic.
+	// reduce file reading time for resending.
 	FileChunk fc = {};
 	if (!inputFile.is_open())
 	{
@@ -106,7 +149,7 @@ bool FileTransmitter::ReadChunk(unsigned char packet[PacketSize])
 		memset(fc.data, 0, FileDataChunkSize);
 		memcpy(fc.data, buffer, FileDataChunkSize);
 		fc.chunkIndex = chunkIndex;
-		// sendTimes[chunkIndex] = (float)clock() / CLOCKS_PER_SEC; // 记录发送时间
+
 		// chunkIndex++;
 		packMessage(packet, FCID, &fc, sizeof(fc));
 	}
@@ -131,35 +174,19 @@ State FileTransmitter::GetState() const
 	return state; 
 }
 
-void FileTransmitter::PackEOF(unsigned char packet[PacketSize])
-{
-	// Content: ENDID and file.  
-	packMessage(packet, ENDID, &crc, sizeof(crc));
-}
-
-void FileTransmitter::packMessage(unsigned char packet[PacketSize],
-	uint32_t id, const void* content, size_t size)
-{
-	Message ms = {};
-	ms.id = id;
-	memset(ms.content, 0, ContentSize);
-	memcpy(ms.content, content, size);
-	memset(packet, 0, PacketSize);
-	memcpy(packet, &ms, sizeof(ms));
-}
 
 void FileTransmitter::ProcessPacket(unsigned char packet[PacketSize])
 {
 	memset(&rcMs, 0, sizeof(rcMs));
 	memcpy(&rcMs, packet, sizeof(rcMs));
 }
-
+// call update after received a new message
 void FileTransmitter::Update()
 {
 	switch (rcMs.id)
 	{
 	case MDID: // parse metadata
-		if (!sender && state == READY)
+		if (state == LISTENING)
 		{
 			FileMetadata fm = { 0 };
 			// deserialize packet to FileMetadata
@@ -179,30 +206,19 @@ void FileTransmitter::Update()
 				state = CRACKED;
 				return;
 			}	
-			state = RECEIVING;
+			state = READY;
 		}
 		break;
 
 	case FCID: // file chunk, write file data
-		if (!sender && state == RECEIVING)
+		if (state == READY)
 		{
-			FileChunk fc = {};
-			// deserialize packet 
-			memcpy(&fc, rcMs.content, sizeof(fc));
-			chunkIndex = fc.chunkIndex;
-			// write to file
-			// don't write data having been already written
-			if (!chunkReceived[chunkIndex] && outputFile.good() )
-			{
-				outputFile.seekp(chunkIndex * FileDataChunkSize);
-				outputFile.write((char*)fc.data, FileDataChunkSize);
-				chunkReceived[chunkIndex] = true;
-				// to sent an ack with chunkIndex.
-			}
-			if (!outputFile.good())
-			{
-				state = CRACKED;
-			}
+			writeChunk();
+			state = RECEIVING;
+		}
+		if (state == RECEIVING)
+		{
+			writeChunk();			
 		}
 		break;
 
@@ -210,8 +226,7 @@ void FileTransmitter::Update()
 		if (!sender && state == RECEIVING && chunkReceived.back())
 		{
 			outputFile.close();
-			state = CHECKING;
-
+			//state = CHECKING;
 			// checke crc
 			inputFile.open(fileName, ios::binary);
 			if (!inputFile)
@@ -263,6 +278,36 @@ void FileTransmitter::calculateFileCRC(ifstream& ifs, uint32_t& crc)
 	{
 		ifs.read(data, FileDataChunkSize);
 		crc = CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32(), crc);
+	}
+}
+void FileTransmitter::packMessage(unsigned char packet[PacketSize],
+	uint32_t id, const void* content, size_t size)
+{
+	Message ms = {};
+	ms.id = id;
+	memset(ms.content, 0, ContentSize);
+	memcpy(ms.content, content, size);
+	memset(packet, 0, PacketSize);
+	memcpy(packet, &ms, sizeof(ms));
+}
+void FileTransmitter::writeChunk()
+{
+	FileChunk fc = {};
+	// deserialize packet 
+	memcpy(&fc, rcMs.content, sizeof(fc));
+	chunkIndex = fc.chunkIndex;
+	// write to file
+	// don't rewrite data having been already written
+	if (!chunkReceived[chunkIndex] && outputFile.good())
+	{
+		outputFile.seekp(chunkIndex * FileDataChunkSize);
+		outputFile.write((char*)fc.data, FileDataChunkSize);
+		chunkReceived[chunkIndex] = true;
+		// to sent an ack with chunkIndex.
+	}
+	if (!outputFile.good())
+	{
+		state = CRACKED;
 	}
 }
 void FileTransmitter::read()

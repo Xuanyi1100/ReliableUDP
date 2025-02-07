@@ -19,17 +19,21 @@ namespace udpft
     const uint32_t MDID = 1;
     const uint32_t FCID = 2;
     const uint32_t ENDID = 3;
+    const uint32_t OKID = 4;
+    const uint32_t ACKID = 5;
+    const uint32_t DISID = 6;
 
     enum State {
         CRACKED = 0,
         // for a sender:
-        HOLD,
+        WAVING,
         SENDING,
         // CLOSING,
         // for a receiver 
+        LISTENING,
         READY,
         RECEIVING,
-        CHECKING,
+        // CHECKING,
         DISCONNECTING,
 	};
 
@@ -60,7 +64,7 @@ namespace udpft
         ofstream outputFile;
 
         vector<bool> chunkReceived; // for the receiver, check if a chunk is received and written.
-        vector<bool> ackOfChunks; // check if received a file chunk ack.
+        vector<bool> ackOfChunks; // for the sender, check if received a file chunk ack.
         Message rcMs;
 
         State state;
@@ -71,19 +75,21 @@ namespace udpft
         int totalChunks;
         uint32_t crc;
 
-        uint32_t chunkIndex; // where to set it?
+        uint32_t chunkIndex;
         clock_t disconnectTime;
         
         // map<int, float> sendTimes;
         inline void calculateFileCRC(ifstream& ifs, uint32_t& crc);
         inline void packMessage(unsigned char packet[PacketSize], 
             uint32_t id, const void* content, size_t size);
+        void writeChunk();
     public:
 
         FileTransmitter();
         ~FileTransmitter();
         int Initialize(const string& filePath, bool isSender);
         void Close();
+        void LoadPacket(unsigned char packet[PacketSize]);
         void PackMetaData(unsigned char packet[PacketSize]);
         bool ReadChunk(unsigned char packet[PacketSize]);
         void PackEOF(unsigned char packet[PacketSize]);
