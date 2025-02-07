@@ -60,7 +60,7 @@ namespace udpft
         ofstream outputFile;
 
         vector<bool> chunkReceived; // for the receiver, check if a chunk is received and written.
-        vector<bool> ackOfChunks; // for receiver check if received a file chunk ack.
+        vector<bool> ackOfChunks; // check if received a file chunk ack.
         Message rcMs;
 
         State state;
