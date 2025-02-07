@@ -65,24 +65,29 @@ namespace udpft
 
         vector<bool> chunkReceived; // for the receiver, check if a chunk is received and written.
         vector<bool> ackOfChunks; // for the sender, check if received a file chunk ack.
-        Message rcMs;
+        Message rcMs;      // store the received message.
 
-        State state;
+        State state; 
         bool sender;
-
+       
+        /***** metadata of the transfering file *****/
         string fileName;
         int fileSize;
         int totalChunks;
         uint32_t crc;
 
-        uint32_t chunkIndex;
+        /*************/
+
+        uint32_t chunkIndex; // for reading or writing a file chunk
         clock_t disconnectTime;
         
         // map<int, float> sendTimes;
         inline void calculateFileCRC(ifstream& ifs, uint32_t& crc);
         inline void packMessage(unsigned char packet[PacketSize], 
             uint32_t id, const void* content, size_t size);
+        inline void openFileForWriting();
         void writeChunk();
+        void storeMetadata();
     public:
 
         FileTransmitter();
@@ -92,8 +97,6 @@ namespace udpft
         void LoadPacket(unsigned char packet[PacketSize]);
         void PackMetaData(unsigned char packet[PacketSize]);
         bool ReadChunk(unsigned char packet[PacketSize]);
-        void PackEOF(unsigned char packet[PacketSize]);
-        bool IsEOF() const;
         string GetFileName() const;
         State GetState() const;
         uint32_t GetTotalChunks();

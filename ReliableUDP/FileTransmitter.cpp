@@ -49,12 +49,7 @@ int FileTransmitter::Initialize(const string& filePath, bool isSender)
 
 		// Calculate CRC32 of the file
 		inputFile.seekg(0, ios::beg);
-		char data[FileDataChunkSize] = { 0 };
-		while (inputFile.good())
-		{
-			inputFile.read(data, FileDataChunkSize);
-			crc = CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32(), crc);
-		}
+		calculateFileCRC(inputFile,crc);
 		// go back to the start of the file
 		inputFile.seekg(0, ios::beg);
 		state = WAVING;
@@ -87,7 +82,7 @@ void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
 			if (inputFile.eof())
 			{
 				// Content: ENDID 
-				packMessage(packet, ENDID, NULL, 0);
+				packMessage(packet, ENDID, &crc, sizeof(crc));
 			}
 			else
 			{
@@ -95,6 +90,10 @@ void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
 				ReadChunk(packet);
 			}
 			break;
+		case CRACKED:
+		default:
+			state = CRACKED;
+			return;
 		}
 	}
 	else
@@ -103,7 +102,7 @@ void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
 		{
 		case READY:
 			// OK for receving file chunks.
-			packMessage(packet, OKID, NULL, 0);
+			packMessage(packet, OKID, &crc, sizeof(crc));
 			break;
 		case RECEIVING:
 			// ACK for a chunk
@@ -112,6 +111,10 @@ void FileTransmitter::LoadPacket(unsigned char packet[PacketSize])
 		case DISCONNECTING:
 			packMessage(packet, DISID, &crc, sizeof(crc));
 			break;
+		case CRACKED:
+		default:
+			state = CRACKED;
+			return;
 		}
 	}
 }
@@ -183,29 +186,24 @@ void FileTransmitter::ProcessPacket(unsigned char packet[PacketSize])
 // call update after received a new message
 void FileTransmitter::Update()
 {
+	if (state == CRACKED) return;
+	if (state = DISCONNECTING)
+	{
+		// back to ready after being in disconnecting state for 1s
+		double duration = double(clock() - disconnectTime) / CLOCKS_PER_SEC;
+		if (duration > 1)
+		{
+			Initialize("", false);
+		}
+	}
 	switch (rcMs.id)
 	{
 	case MDID: // parse metadata
 		if (state == LISTENING)
 		{
-			FileMetadata fm = { 0 };
-			// deserialize packet to FileMetadata
-			memcpy(&fm, rcMs.content, sizeof(fm));
-
-			// store metadata, open output file and start to receive the file.
-			fileName = fm.fileName;
-			fileSize = fm.fileSize;
-			totalChunks = fm.totalChunks;
-			crc = fm.crc32;
-			chunkReceived.assign(totalChunks,false);
-
-			outputFile.open(fileName, std::ios::binary);
-			if (outputFile.is_open())
-			{
-				std::cerr << "Error opening file for writing: " << fileName << std::endl;
-				state = CRACKED;
-				return;
-			}	
+			storeMetadata();
+			openFileForWriting();
+			if (state = CRACKED) return;
 			state = READY;
 		}
 		break;
@@ -214,19 +212,20 @@ void FileTransmitter::Update()
 		if (state == READY)
 		{
 			writeChunk();
+			if (state == CRACKED) return;
 			state = RECEIVING;
 		}
 		if (state == RECEIVING)
 		{
-			writeChunk();			
+			writeChunk();
+			if (state == CRACKED) return;
 		}
 		break;
 
 	case ENDID:
-		if (!sender && state == RECEIVING && chunkReceived.back())
+		if (state == RECEIVING && chunkReceived.back())
 		{
 			outputFile.close();
-			//state = CHECKING;
 			// checke crc
 			inputFile.open(fileName, ios::binary);
 			if (!inputFile)
@@ -235,42 +234,38 @@ void FileTransmitter::Update()
 				state = CRACKED;
 				return;
 			}
-			uint32_t endCRC = 0;
-			calculateFileCRC(inputFile,endCRC);
-			if (endCRC != crc)
+			uint32_t finalCRC = 0;
+			calculateFileCRC(inputFile, finalCRC);
+			inputFile.close();
+			if (finalCRC != crc)
 			{
-				// 1.2 not equal to CRC, sent a request to resend the file.
-				return;
+				// not equal to CRC, be prepare for receiving the file from the head.
+				chunkReceived.assign(totalChunks, false);
+				openFileForWriting();
+				if (state == CRACKED) return;
+				state = READY;
 			}
-			
-			state = DISCONNECTING;	
-			// record current time 
-			disconnectTime = clock();
+			else
+			{
+				state = DISCONNECTING;
+				// record current time 
+				disconnectTime = clock();
+			}
 		}
-		break;
 
+	case OKID:
+
+		break;
+	case ACKID:
+		break;
+	case DISID:
+
+		break;
 	default:
-
 		break;
-		// for the receiver 
-		if (state = DISCONNECTING)
-		{
-			// back to ready after being in disconnecting state for 1s
-			double duration = double(clock() - disconnectTime) / CLOCKS_PER_SEC;
-			if (duration > 1)
-			{
-				Initialize("",false);
-			}
-		}
-
-
 	}
-	// 1.if all the element in chunkReceived == true, and receivd an END message, then 
-	//	 close file and calculate CRC.
-	//   1.1 result CRC is equal to crc. then switch back to ready state, waiting for the next file.
-	//	 
-	// 2. not all true :
 }
+
 void FileTransmitter::calculateFileCRC(ifstream& ifs, uint32_t& crc)
 {
 	char data[FileDataChunkSize] = { 0 };
@@ -278,6 +273,15 @@ void FileTransmitter::calculateFileCRC(ifstream& ifs, uint32_t& crc)
 	{
 		ifs.read(data, FileDataChunkSize);
 		crc = CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32(), crc);
+	}
+}
+void FileTransmitter::openFileForWriting()
+{
+	outputFile.open(fileName, std::ios::binary);
+	if (outputFile.is_open())
+	{
+		std::cerr << "Error opening file for writing: " << fileName << std::endl;
+		state = CRACKED;
 	}
 }
 void FileTransmitter::packMessage(unsigned char packet[PacketSize],
@@ -289,6 +293,19 @@ void FileTransmitter::packMessage(unsigned char packet[PacketSize],
 	memcpy(ms.content, content, size);
 	memset(packet, 0, PacketSize);
 	memcpy(packet, &ms, sizeof(ms));
+}
+void FileTransmitter::storeMetadata()
+{
+	FileMetadata fm = {};
+	// deserialize packet to FileMetadata
+	memcpy(&fm, rcMs.content, sizeof(fm));
+
+	// store metadata, open output file and start to receive the file.
+	fileName = fm.fileName;
+	fileSize = fm.fileSize;
+	totalChunks = fm.totalChunks;
+	crc = fm.crc32;
+	chunkReceived.assign(totalChunks, false);
 }
 void FileTransmitter::writeChunk()
 {
@@ -340,48 +357,7 @@ void FileTransmitter::read()
 
 	fileSent = true;
 }
-	}
 
-	//static std::ofstream outputFile;
-	static std::vector<unsigned char> receivedFile;
-	static FileMetadata receivedMetadata;
-	static uint32_t receivedChunks = 0;
-
-	while (true) {
-		// deserialize the received data 
-		unsigned char packet[PacketSize];
-		int bytes_read = connection.ReceivePacket(packet, sizeof(packet));
-		if (bytes_read == 0) break;
-
-		if (bytes_read == sizeof(FileMetadata)) {
-			// Received metadata
-			memcpy(&receivedMetadata, packet, sizeof(receivedMetadata));
-			receivedFile.resize(receivedMetadata.fileSize);
-			printf("Receiving file: %s (%u bytes)\n",
-				receivedMetadata.fileName, receivedMetadata.fileSize);
-			printf("Expecting %u bytes in %u chunks\n",
-				receivedMetadata.fileSize, receivedMetadata.totalChunks);
-			// receivedFile.reserve(receivedMetadata.fileSize); // Pre-allocate exact size
-		}
-		else if (bytes_read == sizeof(FileChunk)) {
-			// Received file chunk
-			FileChunk chunk;
-			memcpy(&chunk, packet, sizeof(FileChunk));
-
-			// Ensure vector is properly sized before writing
-			// not necessary 
-			size_t offset = chunk.chunkIndex * FileDataChunkSize;
-			size_t remaining = receivedMetadata.fileSize - offset;
-			size_t copySize = (((FileDataChunkSize) < (remaining)) ? (FileDataChunkSize) : (remaining));
-
-			if (offset + copySize > receivedFile.size()) {
-				receivedFile.resize(offset + copySize);
-			}
-
-			memcpy(receivedFile.data() + offset, chunk.data, copySize);
-			receivedChunks++;
-
-			// Check if transfer complete
 			if (receivedChunks == receivedMetadata.totalChunks) {
 				// Verify CRC
 				printf("Finalizing transfer with %u/%u chunks received\n",
