@@ -13,7 +13,8 @@ namespace udpft
     const int MaxFileNameLength = 128;
     const int ContentSize = PacketSize - sizeof(uint32_t);
     const int FileDataChunkSize = PacketSize - 2 * sizeof(uint32_t);
-    // Signal
+
+    const string DefaultFileName = "default";
 
     // ID for different types of message 
     const uint32_t MDID = 1;
@@ -22,6 +23,7 @@ namespace udpft
     const uint32_t OKID = 4;
     const uint32_t ACKID = 5;
     const uint32_t DISID = 6;
+    const uint32_t RSID = 7;
 
     const double DISCONNECT_DURATION = 1000; // milliseconds for saying goodbye to the sender.
     enum State {
@@ -37,7 +39,7 @@ namespace udpft
         CLOSED,
 	};
 
-#pragma pack(push, 1) // for serialize structs
+#pragma pack(push, 4) // for serialize structs
     struct FileMetadata {
         char fileName[MaxFileNameLength];
         uint32_t fileSize;
@@ -62,6 +64,7 @@ namespace udpft
 
         ifstream inputFile;
         ofstream outputFile;
+        vector<char> fileData;
 
         vector<bool> chunkReceived; // for the receiver, check if a chunk is received.
         vector<bool> ackOfChunks; // for the sender, check if received a file chunk ack.
@@ -70,7 +73,7 @@ namespace udpft
 
         State state; 
         bool sender;
-       
+        
         /***** metadata of the transfering file *****/
         string fileName;
         int fileSize;
@@ -78,19 +81,19 @@ namespace udpft
         uint32_t crc;
 
         /*************/
-
+        bool resent;
         uint32_t chunkIndex;                // for sending or writing a file chunk
         chrono::steady_clock::time_point disconnectTime;
         
         
-        inline void calculateFileCRC(ifstream& ifs, uint32_t& crc);
-        inline void openFileForWriting();
+        inline uint32_t calculateFileCRC();
+        inline void writeFile();
         inline void packMessage(unsigned char packet[PacketSize], 
             uint32_t id, const void* content, size_t size);
         void packMetaData(unsigned char packet[PacketSize]);
-        void readChunk(unsigned char packet[PacketSize]);
+        void readChunk();
         void storeMetadata(); // for receiver 
-        void writeChunk();
+        void storeChunk();
 
     public:
 

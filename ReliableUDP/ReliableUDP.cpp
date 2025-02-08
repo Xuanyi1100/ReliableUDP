@@ -198,6 +198,9 @@ int main(int argc, char* argv[])
 	}
 	auto startTime = chrono::high_resolution_clock::now();
 
+	unsigned char test[PacketSize] = {0};
+	ftp.LoadPacket(test);
+
 	while (true)
 	{
 
@@ -306,10 +309,18 @@ int main(int argc, char* argv[])
 		// update the file transfer
 
 		ftp.Update();	
+		if (ftp.GetState() == CRACKED)
+		{
+			printf("File tramsmitter cracked\n");
+			printf("%s\n", ftp.GetFileName().c_str());
+			printf("file size: %u bytes\n", ftp.GetFileSize());
+			printf("Original CRC claim: 0x%08X\n", ftp.GetFileCRC());
+			return 1;
+		}
 		if (ftp.GetState() == DISCONNECTING)
 		{
 			printf("%s Received\n", ftp.GetFileName().c_str());
-			printf("Received file size: %zu bytes\n", ftp.GetFileSize());
+			printf("Received file size: %u bytes\n", ftp.GetFileSize());
 			printf("Original CRC claim: 0x%08X\n", ftp.GetFileCRC());
 		}
 		if (ftp.GetState() == CLOSED)
@@ -327,11 +338,8 @@ int main(int argc, char* argv[])
 			printf("File size: %.2f KB\n", fileSize / 1024.0f);
 			printf("Transfer time: %.2fs\n", transferTime);
 			printf("Effective speed: %.2f Mbps\n", speedMbps);
-			printf("FileTeleporter state: %d\n", (int)ftp.GetState());
-
 			break;
 		}
-
 		net::wait(DeltaTime);
 	}
 	ftp.Close();

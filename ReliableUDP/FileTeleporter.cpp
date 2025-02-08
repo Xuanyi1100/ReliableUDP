@@ -9,8 +9,9 @@ FileTeleporter::FileTeleporter()
 	fileSize = 0;
 	crc = 0;
 	totalChunks = 0;
-	fileName = "default";
+	fileName = DefaultFileName;
 	chunkIndex = 0;
+	resent = false;
 }
 FileTeleporter::~FileTeleporter()
 {
@@ -28,7 +29,11 @@ void FileTeleporter::Close()
 	}
 	ackOfChunks.clear();
 	chunkReceived.clear();
-	if(sender) state = CLOSED;
+	if (sender) 
+	{
+		state = CLOSED;
+		std::cout << "Sender Closed" << endl;
+	}
 }
 uint32_t FileTeleporter::GetFileCRC() const
 {
@@ -61,18 +66,32 @@ bool FileTeleporter::Initialize(const string& filePath, bool isSender)
 		}
 		// open the file 
 		inputFile.open(filePath, ios::binary | ios::ate);
-		if (!inputFile)
+		if (!inputFile.is_open())
 		{
 			cerr << "Error opening file for reading: " << filePath << endl;
 			return false;
 		}
-
 		fileSize = inputFile.tellg();
 		totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
+		// read file to a buffer.
+		fileData.assign(fileSize,0);
+		inputFile.read(fileData.data(), fileSize);
+		if (inputFile.gcount() != fileSize)
+		{
+			cerr << "Error reading the file: " << filePath << endl;
+			return false;
+		}
+		inputFile.close();
+		if (inputFile.fail())
+		{
+			cerr << "Error closing the file: " << filePath << endl;
+			return false;
+		}
+
 		// Calculate CRC32 of the file
-		inputFile.seekg(0, ios::beg);
-		calculateFileCRC(inputFile, crc);
+		crc = calculateFileCRC();
 		state = WAVING;
+		std::cout<< "Waving the file: " << filePath << endl;
 	}
 	else // receiver 
 	{
@@ -82,33 +101,27 @@ bool FileTeleporter::Initialize(const string& filePath, bool isSender)
 		totalChunks = 0;
 		fileName = filePath;
 		chunkReceived.clear();
-
 		state = LISTENING;
+		std::cout << "File receiver listening" << endl;
 	}
 	return true;
 }
 
 void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 {
-	if (sender)
+	if (sender) // client
 	{
-		switch (state) //
+		switch (state) 
 		{
 		case WAVING:
 			// MDID
 			packMetaData(packet);
 			break;
 		case SENDING:
-			if (inputFile.eof())
+			if (inputFile.eof() && ackOfChunks.back())
 			{
 				// ENDID 
 				packMessage(packet, ENDID, &crc, sizeof(crc));
-			}
-			else if (ackOfChunks[chunkIndex])
-			{
-				// FCID ,read nextchunk
-				++chunkIndex;
-				readChunk(packet);
 			}
 			else
 			{
@@ -117,19 +130,27 @@ void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 			}
 			break;
 		case CRACKED:
+			break;
 		default:
-			state = CRACKED;
 			return;
 		}
 	}
-	else
+	else // server 
 	{
 		switch (state)
 		{
 		case READY:
-			// OKID
-			// OK for receving file chunks.
-			packMessage(packet, OKID, &crc, sizeof(crc));
+			if (resent)
+			{
+				// RSID request file resent
+				packMessage(packet, RSID, &crc,sizeof(crc));
+			}
+			else
+			{
+				// OKID
+				// OK for receving file chunks.
+				packMessage(packet, OKID, &crc, sizeof(crc));
+			}
 			break;
 		case RECEIVING:
 			// ACKID
@@ -142,7 +163,6 @@ void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 			break;
 		case CRACKED:
 		default:
-			state = CRACKED;
 			return;
 		}
 	}
@@ -157,7 +177,9 @@ void FileTeleporter::ProcessPacket(unsigned char packet[PacketSize])
 void FileTeleporter::Update()
 {
 	if (state == CRACKED) return;
+
 	/***************** File Receiver *****************/
+
 	if (state == DISCONNECTING)
 	{
 		// back to ready after being in disconnecting state for 1s
@@ -165,7 +187,7 @@ void FileTeleporter::Update()
 			chrono::steady_clock::now() - disconnectTime).count();
 		if (duration > DISCONNECT_DURATION)
 		{
-			Initialize("default", false);
+			Initialize(DefaultFileName, false);
 		}
 	}
 	switch (rcMs.id)
@@ -174,69 +196,66 @@ void FileTeleporter::Update()
 		if (state == LISTENING)
 		{
 			storeMetadata();
-			openFileForWriting();
-			if (state == CRACKED) return;
+			fileData.assign(fileSize,0);
 			state = READY;
+			std::cout << "Receiver is ready" << endl;
 		}
 		break;
 
-	case FCID: // file chunk, write file data
+	case FCID: // file chunk, store file data
 		if (state == READY)
 		{
-			writeChunk();
-			if (state == CRACKED) return;
+			storeChunk();
 			state = RECEIVING;
+			resent = false;
+			std::cout << " Receiving the file" << endl;
 		}
 		if (state == RECEIVING)
 		{
-			writeChunk();
-			if (state == CRACKED) return;
+			storeChunk();
 		}
 		break;
 
 	case ENDID:
 		if (state == RECEIVING && chunkReceived.back())
 		{
-			outputFile.close();
-			// checke crc
-			inputFile.open(fileName, ios::binary);
-			if (!inputFile)
-			{
-				cerr << "Error opening file for computing CRC: " << fileName << endl;
-				state = CRACKED;
-				return;
-			}
-			uint32_t finalCRC = 0;
-			calculateFileCRC(inputFile, finalCRC);
-			inputFile.close();
+			uint32_t finalCRC = calculateFileCRC();
 			if (finalCRC != crc)
 			{
+				resent = true;
 				cerr << " File verification failed:" << fileName << endl;
 				cerr << " Original File CRC: " << crc << endl;
 				cerr << " Received File CRC: " << finalCRC << endl;
 
 				// not equal to CRC, be prepare for receiving the file from the head.
-				chunkReceived.assign(totalChunks, false);
-				openFileForWriting();
-				if (state == CRACKED) return;
+				chunkReceived.assign(totalChunks, false);				
+				fileData.assign(fileSize, 0);
+
 				state = READY;
+				std::cout << " Ready for retransmission" << endl;
 			}
 			else
 			{
+				writeFile();
+				if (state == CRACKED) return;
 				state = DISCONNECTING;
+				std::cout << " Disonnecting " << endl;
 				// record current time
 				disconnectTime = chrono::high_resolution_clock::now();
 			}
 		}
 		break;
-		/********************* File SENDER ***************/
+
+/********************* File SENDER ***************/
+
 	case OKID:
 		if (state == WAVING)
 		{
-			// go back to the start of the file
-			inputFile.seekg(0, ios::beg);
+			chunkIndex = 0;
 			ackOfChunks.assign(totalChunks, false);
 			state = SENDING;
+			readChunk();
+			std::cout << " Sending the file" << endl;
 		}
 		break;
 	case ACKID:
@@ -247,7 +266,8 @@ void FileTeleporter::Update()
 			memcpy(&ackedChunkIndex, rcMs.content, sizeof(ackedChunkIndex));
 			if (ackedChunkIndex == chunkIndex)
 			{
-				ackOfChunks[chunkIndex] = true;
+				ackOfChunks[chunkIndex++] = true;
+				readChunk();
 			}
 		}
 		break;
@@ -257,27 +277,45 @@ void FileTeleporter::Update()
 			Close();
 		}
 		break;
+	case RSID:
+		if (state == SENDING)
+		{
+			chunkIndex = 0;
+			ackOfChunks.assign(totalChunks,false);
+		}
+		break;
 	default:
 		break;
 	}
 }
 
-void FileTeleporter::calculateFileCRC(ifstream& ifs, uint32_t& crc)
+uint32_t FileTeleporter::calculateFileCRC()
 {
-	char data[FileDataChunkSize] = { 0 };
-	while (ifs.good())
-	{
-		ifs.read(data, FileDataChunkSize);
-		crc = CRC::Calculate(data, ifs.gcount(), CRC::CRC_32(), crc);
-	}
+	return CRC::Calculate(fileData.data(), fileData.size(), CRC::CRC_32());
 }
-void FileTeleporter::openFileForWriting()
+
+void FileTeleporter::writeFile()
 {
-	outputFile.open(fileName, std::ios::binary);
-	if (outputFile.is_open())
+	outputFile.open(fileName, ios::binary);
+	if (!outputFile.is_open())
 	{
-		std::cerr << "Error opening file for writing: " << fileName << std::endl;
+		cerr << "Error opening file for writing: " << fileName << std::endl;
 		state = CRACKED;
+		return;
+	}
+	outputFile.write(fileData.data(),fileData.size());
+	if (!outputFile.good())
+	{
+		cerr << "Error opening file for writing: " << fileName << std::endl;
+		state = CRACKED;
+		return;
+	}
+	outputFile.close();
+	if (inputFile.fail())
+	{
+		cerr << "Error closing the file: " << fileName << endl;
+		state = CRACKED;
+		return;
 	}
 }
 void FileTeleporter::packMessage(unsigned char packet[PacketSize],
@@ -307,38 +345,17 @@ void FileTeleporter::packMetaData(unsigned char packet[PacketSize])
 	packMessage(packet, MDID, &metadata, sizeof(metadata));
 }
 
-void FileTeleporter::readChunk(unsigned char packet[PacketSize])
+void FileTeleporter::readChunk()
 {
-	if (!inputFile.is_open())
-	{
-		cerr << "Error file not open: " << fileName << endl;
-		state = CRACKED;
-		return;
-	}
-	char buffer[FileDataChunkSize];
-	inputFile.read(buffer, FileDataChunkSize);
-	if (inputFile)
-	{
-		/******************for test ********************/
-		size_t bytesRead = inputFile.gcount();
-		if (bytesRead < FileDataChunkSize)
-		{
-			std::cout << "Read " << bytesRead << " bytes in the last time" << std::endl;
-		}
-		/***********************/ 
-		memset(fc.data, 0, FileDataChunkSize);
-		memcpy(fc.data, buffer, FileDataChunkSize);
-		fc.chunkIndex = chunkIndex;
-		packMessage(packet, FCID, &fc, sizeof(fc));
-	}
-	if (inputFile.eof())
-	{
-		cout << "Reached end of file after reading" << endl;
-	}
-	if (!inputFile.good())
-	{
-		cerr << "Error reading file Chunk: " << fileName << endl;
-		state = CRACKED;
+	fc.chunkIndex = chunkIndex;
+	size_t offset = chunkIndex * FileDataChunkSize;
+	size_t chunkSize = (((FileDataChunkSize) < (fileSize - offset))
+		? (FileDataChunkSize) : (fileSize - offset));
+	// Copy from memory buffer instead of re-reading file
+	memcpy(fc.data, fileData.data() + offset, chunkSize);
+	// Fill remaining space with zeros if needed
+	if (chunkSize < FileDataChunkSize) {
+		memset(fc.data + chunkSize, 0, FileDataChunkSize - chunkSize);
 	}
 }
 void FileTeleporter::storeMetadata()
@@ -354,30 +371,29 @@ void FileTeleporter::storeMetadata()
 	crc = fm.crc32;
 	chunkReceived.assign(totalChunks, false);
 }
-void FileTeleporter::writeChunk()
+void FileTeleporter::storeChunk()
 {
-	// deserialize packet
 	memset(&fc, 0, sizeof(fc));
 	memcpy(&fc, rcMs.content, sizeof(fc));
-	chunkIndex = fc.chunkIndex;
-	size_t bytesWrite = FileDataChunkSize;
-	if (chunkIndex == totalChunks - 1)
-	{
-		bytesWrite = fileSize % FileDataChunkSize;
-	}
-
-	// write to file
+	chunkIndex = fc.chunkIndex;	
+	// write to file data buffer
 	// don't rewrite data having been already written
-	if (!chunkReceived[chunkIndex] && outputFile.good())
+	if (!chunkReceived[chunkIndex])
 	{
-		outputFile.seekp(chunkIndex * FileDataChunkSize);
-		outputFile.write((char*)fc.data, bytesWrite);
-		chunkReceived[chunkIndex] = true;
+		// Ensure vector is properly sized before writing
+		size_t offset = fc.chunkIndex * FileDataChunkSize;
+		size_t remaining = fileSize - offset;
+
+		// Only write valid bytes in the final chunk 
+		size_t copySize = (((FileDataChunkSize) < (remaining)) ?
+			(FileDataChunkSize) : (remaining));
+
+		if (offset + copySize > fileData.size())
+		{
+			fileData.resize(offset + copySize);
+		}
+		memcpy(fileData.data() + offset, fc.data, copySize);
 		// to sent an ack with chunkIndex.
-	}
-	if (!outputFile.good())
-	{
-		cerr << "Error writing file chunk: " << fileName << endl;
-		state = CRACKED;
+		chunkReceived[chunkIndex] = true;
 	}
 }
