@@ -3,13 +3,14 @@ using namespace udpft;
 FileTeleporter::FileTeleporter()
 {
 	rcMs = {};
+	fc = {};
 	sender = false;
 	state = CRACKED;
 	fileSize = 0;
 	crc = 0;
 	totalChunks = 0;
 	fileName = "default";
-	chunkReceived.clear();
+	chunkIndex = 0;
 }
 FileTeleporter::~FileTeleporter()
 {
@@ -29,16 +30,23 @@ void FileTeleporter::Close()
 	chunkReceived.clear();
 	if(sender) state = CLOSED;
 }
+uint32_t FileTeleporter::GetFileCRC() const
+{
+	return crc;
+}
 string FileTeleporter::GetFileName() const
 {
 	return fileName;
+}
+uint32_t FileTeleporter::GetFileSize() const
+{
+	return fileSize;
 }
 State FileTeleporter::GetState() const
 {
 	return state;
 }
 
-// return 0 
 bool FileTeleporter::Initialize(const string& filePath, bool isSender)
 {
 	sender = isSender;
@@ -150,7 +158,7 @@ void FileTeleporter::Update()
 {
 	if (state == CRACKED) return;
 	/***************** File Receiver *****************/
-	if (state = DISCONNECTING)
+	if (state == DISCONNECTING)
 	{
 		// back to ready after being in disconnecting state for 1s
 		double duration = chrono::duration<double, milli>(
@@ -167,7 +175,7 @@ void FileTeleporter::Update()
 		{
 			storeMetadata();
 			openFileForWriting();
-			if (state = CRACKED) return;
+			if (state == CRACKED) return;
 			state = READY;
 		}
 		break;
@@ -203,6 +211,10 @@ void FileTeleporter::Update()
 			inputFile.close();
 			if (finalCRC != crc)
 			{
+				cerr << " File verification failed:" << fileName << endl;
+				cerr << " Original File CRC: " << crc << endl;
+				cerr << " Received File CRC: " << finalCRC << endl;
+
 				// not equal to CRC, be prepare for receiving the file from the head.
 				chunkReceived.assign(totalChunks, false);
 				openFileForWriting();
@@ -216,6 +228,7 @@ void FileTeleporter::Update()
 				disconnectTime = chrono::high_resolution_clock::now();
 			}
 		}
+		break;
 		/********************* File SENDER ***************/
 	case OKID:
 		if (state == WAVING)
@@ -285,7 +298,7 @@ void FileTeleporter::packMetaData(unsigned char packet[PacketSize])
 {
 	// Prepare metadata
 	FileMetadata metadata = {};
-	strncpy(metadata.fileName, fileName.c_str(), MaxFileNameLength - 1);
+	memcpy(metadata.fileName, fileName.c_str(), MaxFileNameLength - 1);
 	metadata.fileName[MaxFileNameLength - 1] = '\0';
 	metadata.fileSize = fileSize;
 	metadata.totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
@@ -367,61 +380,4 @@ void FileTeleporter::writeChunk()
 		cerr << "Error writing file chunk: " << fileName << endl;
 		state = CRACKED;
 	}
-}
-
-void FileTeleporter::read()
-{
-	// Wait for all acks with timeout
-	// ????
-	// 
-	//float ackWaitTime = 0.0f;
-	//while (ackWaitTime < AckWaitTime &&
-	//	connection.GetReliabilitySystem().GetAckedPackets() < metadata.totalChunks + 1) {
-	//	connection.Update(DeltaTime);
-	//	ackWaitTime += DeltaTime;
-	//	net::wait(DeltaTime);
-	//}
-
-	// Calculate actual transfer time
-	auto endTime = chrono::high_resolution_clock::now();
-	float transferTime = chrono::duration<float>(endTime - startTime).count();
-
-	// Calculate speed in Mbps (1 megabit = 1,000,000 bits)
-	float fileSizeBits = fileSize * 8.0f;
-	float speedMbps = (fileSizeBits / transferTime) / 1000000.0f;
-
-	printf("Transfer complete!\n");
-	printf("File size: %.2f KB\n", fileSize / 1024.0f);
-	printf("Transfer time: %.2fs\n", transferTime);
-	printf("Effective speed: %.2f Mbps\n", speedMbps);
-
-	printf("Calculated File CRC: 0x%08X\n", fileCRC);
-
-	fileSent = true;
-
-
-	if (receivedChunks == receivedMetadata.totalChunks) {
-		// Verify CRC
-		printf("Finalizing transfer with %u/%u chunks received\n",
-			receivedChunks, receivedMetadata.totalChunks);
-		printf("Received file size: %zu bytes\n", receivedFile.size());
-		printf("Original CRC claim: 0x%08X\n", receivedMetadata.crc32);
-
-		uint32_t calculatedCRC = CRC::Calculate(receivedFile.data(),
-			receivedFile.size(), CRC::CRC_32());
-		printf("Server Calculated CRC: 0x%08X\n", calculatedCRC);
-
-		if (calculatedCRC == receivedMetadata.crc32) {
-			std::ofstream outFile(receivedMetadata.fileName, std::ios::binary);
-			outFile.write(reinterpret_cast<char*>(receivedFile.data()),
-				receivedFile.size());
-			printf("File received and verified successfully!\n");
-		}
-		else {
-			printf("ERROR: File verification failed!\n");
-		}
-	}
-
-	printf("Received chunk %u/%u (%zu bytes)\n",
-		chunk.chunkIndex + 1, receivedMetadata.totalChunks, copySize);
 }

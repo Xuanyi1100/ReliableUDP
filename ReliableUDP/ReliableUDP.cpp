@@ -196,6 +196,7 @@ int main(int argc, char* argv[])
 	{
 		return 1;
 	}
+	auto startTime = chrono::high_resolution_clock::now();
 
 	while (true)
 	{
@@ -303,10 +304,31 @@ int main(int argc, char* argv[])
 		}
 		// process received message.
 		// update the file transfer
-		ftp.Update();
-		printf("FileTeleporter state: %d\n", (int)ftp.GetState());
+
+		ftp.Update();	
+		if (ftp.GetState() == DISCONNECTING)
+		{
+			printf("%s Received\n", ftp.GetFileName().c_str());
+			printf("Received file size: %zu bytes\n", ftp.GetFileSize());
+			printf("Original CRC claim: 0x%08X\n", ftp.GetFileCRC());
+		}
 		if (ftp.GetState() == CLOSED)
 		{
+			// Calculate actual transfer time
+			auto endTime = chrono::high_resolution_clock::now();
+			float transferTime = chrono::duration<float>(endTime - startTime).count();
+			uint32_t fileSize = ftp.GetFileSize();
+
+			// Calculate speed in Mbps (1 megabit = 1,000,000 bits)
+			float fileSizeBits = fileSize * 8.0f;
+			float speedMbps = (fileSizeBits / transferTime) / 1000000.0f;
+
+			printf("Transfer complete!\n");
+			printf("File size: %.2f KB\n", fileSize / 1024.0f);
+			printf("Transfer time: %.2fs\n", transferTime);
+			printf("Effective speed: %.2f Mbps\n", speedMbps);
+			printf("FileTeleporter state: %d\n", (int)ftp.GetState());
+
 			break;
 		}
 

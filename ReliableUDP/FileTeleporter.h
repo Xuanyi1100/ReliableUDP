@@ -97,7 +97,11 @@ namespace udpft
         FileTeleporter();
         ~FileTeleporter();
         void Close();
+
+        uint32_t GetFileCRC() const;
         string GetFileName() const;
+        uint32_t GetFileSize() const;
+        
         State GetState() const;
         bool Initialize(const string& filePath, bool isSender);
         void LoadPacket(unsigned char packet[PacketSize]);
