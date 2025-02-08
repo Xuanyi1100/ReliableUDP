@@ -76,7 +76,8 @@ bool FileTeleporter::Initialize(const string& filePath, bool isSender)
 		fileSize = inputFile.tellg();
 		inputFile.seekg(0,ios::beg);
 		totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
-		
+		ackOfChunks.assign(totalChunks, false);
+
 		// read file to a buffer.
 		fileData.assign(fileSize,0);
 		inputFile.read(fileData.data(), fileSize);
@@ -92,7 +93,6 @@ bool FileTeleporter::Initialize(const string& filePath, bool isSender)
 			cerr << "Error closing the file: " << filePath << endl;
 			return false;
 		}
-
 		// Calculate CRC32 of the file
 		crc = calculateFileCRC();
 		state = WAVING;
@@ -167,6 +167,7 @@ void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 			packMessage(packet, DISID, &crc, sizeof(crc));
 			break;
 		case CRACKED:
+			break;
 		default:
 			return;
 		}
@@ -243,7 +244,7 @@ void FileTeleporter::Update()
 			{
 				writeFile();
 				if (state == CRACKED) return;
-				printf("%s Received\n", fileName);
+				printf("%s Received\n", fileName.c_str());
 				printf("Received file size: %u bytes\n", fileSize);
 				printf("Original CRC claim: 0x%08X\n", crc);
 				state = DISCONNECTING;
@@ -259,8 +260,7 @@ void FileTeleporter::Update()
 	case OKID:
 		if (state == WAVING)
 		{
-			chunkIndex = 0;
-			ackOfChunks.assign(totalChunks, false);
+			chunkIndex = 0;			
 			state = SENDING;
 			readChunk();
 			std::cout << " Sending the file" << endl;
@@ -280,7 +280,7 @@ void FileTeleporter::Update()
 		}
 		break;
 	case DISID:
-		if (ackOfChunks.empty()|| (state == SENDING && ackOfChunks.back()))
+		if (ackOfChunks.empty() || (state == SENDING && ackOfChunks.back()))
 		{
 			Close();
 		}

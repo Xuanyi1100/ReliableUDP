@@ -156,7 +156,7 @@ int main(int argc, char* argv[])
 		else
 		{
 			printf("client mode usage:\n"
-			"%s <ip> [file] \n", argv[0]);
+				"%s <ip> [file] \n", argv[0]);
 			return 1;
 		}
 	}
@@ -198,9 +198,6 @@ int main(int argc, char* argv[])
 	}
 	auto startTime = chrono::high_resolution_clock::now();
 
-	unsigned char test[PacketSize] = {0};
-	ftp.LoadPacket(test);
-
 	while (true)
 	{
 
@@ -223,6 +220,11 @@ int main(int argc, char* argv[])
 		{
 			printf("client connected to server\n");
 			connected = true;
+
+			if (!ftp.Initialize(filePath, isSender))
+			{
+				return 1;
+			}
 		}
 
 		if (!connected && connection.ConnectFailed())
@@ -263,7 +265,7 @@ int main(int argc, char* argv[])
 			int bytes_read = connection.ReceivePacket(packet, sizeof(packet));
 			if (bytes_read == 0)
 				break;
-			ftp.ProcessPacket(packet);	
+			ftp.ProcessPacket(packet);
 		}
 
 
@@ -308,7 +310,7 @@ int main(int argc, char* argv[])
 		// process received message.
 		// update the file transfer
 
-		ftp.Update();	
+		ftp.Update();
 		if (ftp.GetState() == CRACKED)
 		{
 			printf("File tramsmitter cracked\n");
@@ -336,7 +338,6 @@ int main(int argc, char* argv[])
 		}
 		net::wait(DeltaTime);
 	}
-	ftp.Close();
 	ShutdownSockets();
 	return 0;
 }
