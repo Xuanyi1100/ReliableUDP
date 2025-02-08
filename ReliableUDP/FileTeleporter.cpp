@@ -29,6 +29,7 @@ void FileTeleporter::Close()
 	}
 	ackOfChunks.clear();
 	chunkReceived.clear();
+	fileData.clear();
 	if (sender) 
 	{
 		state = CLOSED;
@@ -59,6 +60,7 @@ bool FileTeleporter::Initialize(const string& filePath, bool isSender)
 	{
 		// set file name
 		fileName = filesystem::path(filePath).filename().string();
+
 		if (fileName.length() > MaxFileNameLength - 1)
 		{
 			cerr << "Error: File name out of length limit: " << filePath << endl;
@@ -68,17 +70,20 @@ bool FileTeleporter::Initialize(const string& filePath, bool isSender)
 		inputFile.open(filePath, ios::binary | ios::ate);
 		if (!inputFile.is_open())
 		{
-			cerr << "Error opening file for reading: " << filePath << endl;
+			cerr << "Error opening file for reading: " << fileName << endl;
 			return false;
 		}
 		fileSize = inputFile.tellg();
+		inputFile.seekg(0,ios::beg);
 		totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
+		
 		// read file to a buffer.
 		fileData.assign(fileSize,0);
 		inputFile.read(fileData.data(), fileSize);
-		if (inputFile.gcount() != fileSize)
+		int bytesRead = inputFile.gcount();
+		if (bytesRead != fileSize)
 		{
-			cerr << "Error reading the file: " << filePath << endl;
+			cerr << "Error reading the file: " << fileName << endl;
 			return false;
 		}
 		inputFile.close();
@@ -118,7 +123,7 @@ void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 			packMetaData(packet);
 			break;
 		case SENDING:
-			if (inputFile.eof() && ackOfChunks.back())
+			if (ackOfChunks.empty() || (chunkIndex == totalChunks && ackOfChunks.back()))
 			{
 				// ENDID 
 				packMessage(packet, ENDID, &crc, sizeof(crc));
@@ -196,9 +201,9 @@ void FileTeleporter::Update()
 		if (state == LISTENING)
 		{
 			storeMetadata();
-			fileData.assign(fileSize,0);
+			fileData.assign(fileSize, 0);
 			state = READY;
-			std::cout << "Receiver is ready" << endl;
+			std::cout << "Receiver is ready" << endl;		
 		}
 		break;
 
@@ -217,7 +222,7 @@ void FileTeleporter::Update()
 		break;
 
 	case ENDID:
-		if (state == RECEIVING && chunkReceived.back())
+		if ((state == READY && fileSize == 0) ||(state == RECEIVING && chunkReceived.back()))
 		{
 			uint32_t finalCRC = calculateFileCRC();
 			if (finalCRC != crc)
@@ -238,6 +243,9 @@ void FileTeleporter::Update()
 			{
 				writeFile();
 				if (state == CRACKED) return;
+				printf("%s Received\n", fileName);
+				printf("Received file size: %u bytes\n", fileSize);
+				printf("Original CRC claim: 0x%08X\n", crc);
 				state = DISCONNECTING;
 				std::cout << " Disonnecting " << endl;
 				// record current time
@@ -272,7 +280,7 @@ void FileTeleporter::Update()
 		}
 		break;
 	case DISID:
-		if (state == SENDING && ackOfChunks.back())
+		if (ackOfChunks.empty()|| (state == SENDING && ackOfChunks.back()))
 		{
 			Close();
 		}

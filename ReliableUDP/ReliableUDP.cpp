@@ -317,12 +317,6 @@ int main(int argc, char* argv[])
 			printf("Original CRC claim: 0x%08X\n", ftp.GetFileCRC());
 			return 1;
 		}
-		if (ftp.GetState() == DISCONNECTING)
-		{
-			printf("%s Received\n", ftp.GetFileName().c_str());
-			printf("Received file size: %u bytes\n", ftp.GetFileSize());
-			printf("Original CRC claim: 0x%08X\n", ftp.GetFileCRC());
-		}
 		if (ftp.GetState() == CLOSED)
 		{
 			// Calculate actual transfer time
