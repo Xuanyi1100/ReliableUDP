@@ -4,12 +4,13 @@
 #include <fstream>
 #include <filesystem>
 #include <vector>
+#include <chrono>
 #include "CRC.h"
 using namespace std;
 
 namespace udpft
 {
-    const int PacketSize = 256;
+    const int PacketSize = 1400;
     const int MaxFileNameLength = 128;
     const int ContentSize = PacketSize - sizeof(uint32_t);
     const int FileDataChunkSize = PacketSize - 2 * sizeof(uint32_t);
@@ -64,11 +65,11 @@ namespace udpft
 
         ifstream inputFile;
         ofstream outputFile;
-        vector<char> fileData;
 
+        vector<char> fileData;      // for the receiver, store the file data.
         vector<bool> chunkReceived; // for the receiver, check if a chunk is received.
-        vector<bool> ackOfChunks; // for the sender, check if received a file chunk ack.
-        Message rcMs;      // store the received message.
+        vector<bool> ackOfChunks;   // for the sender, check if received a file chunk ack.
+        Message rcMs;               // store the received message.
         FileChunk fc;
 
         State state; 
@@ -83,7 +84,7 @@ namespace udpft
         /*************/
         bool resent;
         uint32_t chunkIndex;                // for sending or writing a file chunk
-        chrono::steady_clock::time_point disconnectTime;
+        std::chrono::steady_clock::time_point disconnectTime;
         
         
         inline uint32_t calculateFileCRC();
@@ -110,19 +111,6 @@ namespace udpft
         void LoadPacket(unsigned char packet[PacketSize]);
         void ProcessPacket(unsigned char packet[PacketSize]);
         void Update();
-
-        // serialize and deserialize metadata.
-        // break the File into chunks
-
-        //for receiving the file
-        // parse and validate the metadata packet.
-        // receive the File Pieces and append each chunk to the correct file.
-        // verify integrity after all chunks have been received:
-        // compute the checksum/hash of the received file and compare it with the checksum in the metadata.
-        // If the checksum doesn’t match, report an error and request the file again.
-        // save the file to disk
-
-        // serialize the metadata
 
     };
 }

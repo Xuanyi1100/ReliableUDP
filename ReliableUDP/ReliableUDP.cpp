@@ -134,30 +134,31 @@ int main(int argc, char* argv[])
 	Address address;
 	std::string filePath;
 	// parse command line
-	if (argc >= 2)
+	if (argc >= 3)
 	{
-		int a, b, c, d;
-		if (sscanf(argv[1], "%d.%d.%d.%d", &a, &b, &c, &d))
+		int a, b, c, d,e;
+		if (sscanf(argv[1], "%d.%d.%d.%d:%d", &a, &b, &c, &d,&e) == 5)
+		{
+			mode = Client;
+			address = Address(a, b, c, d, e);
+		}
+		else if (sscanf(argv[1], "%d.%d.%d.%d", &a, &b, &c, &d))
 		{
 			mode = Client;
 			address = Address(a, b, c, d, ServerPort);
-			// fetch file path if provided
-			if (argc >= 3) {
-				filePath = argv[2];
-
-				// TODO: Validate the filepath
-				if (!filesystem::exists(filePath) && std::filesystem::is_regular_file(filePath))
-				{
-					printf("Specified file doesn't exist.\n");
-					return 1;
-				}
-			}
 		}
 		else
 		{
 			printf("client mode usage:\n"
-				"%s <ip> [file] \n", argv[0]);
+				"%s <ip:port> [file] \n", argv[0]);
 			return 1;
+		}
+
+		filePath = argv[2];
+		if (!filesystem::exists(filePath) && std::filesystem::is_regular_file(filePath))
+			{
+				printf("Specified file doesn't exist.\n");
+				return 1;
 		}
 	}
 
@@ -236,17 +237,6 @@ int main(int argc, char* argv[])
 		// send and receive packets
 
 		sendAccumulator += DeltaTime;
-		//
-
-		if (mode == Client && !filePath.empty()) {
-			static bool fileSent = false;
-
-			// TODO: instance a file transmitter
-
-			if (!fileSent) {
-				auto startTime = std::chrono::high_resolution_clock::now();
-			}
-		}
 
 		// send packets at a fixed rate
 		while (sendAccumulator > 1.0f / sendRate)

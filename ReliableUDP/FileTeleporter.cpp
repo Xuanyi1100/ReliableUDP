@@ -101,10 +101,13 @@ bool FileTeleporter::Initialize(const string& filePath, bool isSender)
 	else // receiver 
 	{
 		rcMs = {};
+		fc = {};
 		fileSize = 0;
 		crc = 0;
 		totalChunks = 0;
-		fileName = filePath;
+		fileName = DefaultFileName;
+		resent = false;
+		fileData.clear();
 		chunkReceived.clear();
 		state = LISTENING;
 		std::cout << "File receiver listening" << endl;
@@ -167,8 +170,8 @@ void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 			packMessage(packet, DISID, &crc, sizeof(crc));
 			break;
 		case CRACKED:
-			break;
 		default:
+			memset(packet,0,sizeof(packet));
 			return;
 		}
 	}
