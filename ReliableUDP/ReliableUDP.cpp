@@ -189,10 +189,10 @@ int main(int argc, char* argv[])
 	float statsAccumulator = 0.0f;
 
 	FlowControl flowControl;
-	FileTeleporter ftm;
+	FileTeleporter ftp;
 
 	bool isSender = (mode == Client);
-	if (ftm.Initialize(filePath, isSender) != 0)
+	if (!ftp.Initialize(filePath, isSender))
 	{
 		return 1;
 	}
@@ -246,16 +246,7 @@ int main(int argc, char* argv[])
 		while (sendAccumulator > 1.0f / sendRate)
 		{
 			unsigned char packet[PacketSize];
-			ftm.LoadPacket(packet);
-			// In the CLIENT mode
-			// 
-			// 1. Specify the type of the packet (Message ID) and contents
-			// 2. Contents for the packets containing the file meta data
-			// 		 get the seralized meta data of the file from the file transmitter and put it into the packets to send
-			// 3. contents for the packets containing the file chunks
-			//  get the file chunks from the file transmitter and put them into the packet to send
-			// 4. contents for the packets indicating the end of the file
-
+			ftp.LoadPacket(packet);
 			connection.SendPacket(packet, sizeof(packet));
 			sendAccumulator -= 1.0f / sendRate;
 		}
@@ -268,20 +259,7 @@ int main(int argc, char* argv[])
 			int bytes_read = connection.ReceivePacket(packet, sizeof(packet));
 			if (bytes_read == 0)
 				break;
-			ftm.ProcessPacket(packet);
-			switch (ftm.GetState()) //
-			{
-			case READY:
-				
-				break;
-			case RECEIVING:
-
-				break;
-			}
-
-			
-			// verify the file after receiving the EOF packet
-			// save the file and go back to listening state if the file integrity is verified
+			ftp.ProcessPacket(packet);	
 		}
 
 
@@ -302,10 +280,6 @@ int main(int argc, char* argv[])
 		// update connection
 
 		connection.Update(DeltaTime);
-		// TODO: 
-		// pasre received message.
-		
-		// show connection stats
 
 		statsAccumulator += DeltaTime;
 
@@ -327,10 +301,18 @@ int main(int argc, char* argv[])
 
 			statsAccumulator -= 0.25f;
 		}
+		// process received message.
+		// update the file transfer
+		ftp.Update();
+		printf("FileTeleporter state: %d\n", (int)ftp.GetState());
+		if (ftp.GetState() == CLOSED)
+		{
+			break;
+		}
 
 		net::wait(DeltaTime);
 	}
-	ftm.Close();
+	ftp.Close();
 	ShutdownSockets();
 	return 0;
 }

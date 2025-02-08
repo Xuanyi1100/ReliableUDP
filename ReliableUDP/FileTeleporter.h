@@ -23,18 +23,18 @@ namespace udpft
     const uint32_t ACKID = 5;
     const uint32_t DISID = 6;
 
+    const double DISCONNECT_DURATION = 1000; // milliseconds for saying goodbye to the sender.
     enum State {
         CRACKED = 0,
-        // for a sender:
-        WAVING,
-        SENDING,
-        // CLOSING,
         // for a receiver 
         LISTENING,
         READY,
         RECEIVING,
-        // CHECKING,
         DISCONNECTING,
+        // for a sender:
+        WAVING,
+        SENDING,
+        CLOSED,
 	};
 
 #pragma pack(push, 1) // for serialize structs
@@ -63,7 +63,7 @@ namespace udpft
         ifstream inputFile;
         ofstream outputFile;
 
-        vector<bool> chunkReceived; // for the receiver, check if a chunk is received and written.
+        vector<bool> chunkReceived; // for the receiver, check if a chunk is received.
         vector<bool> ackOfChunks; // for the sender, check if received a file chunk ack.
         Message rcMs;      // store the received message.
         FileChunk fc;
@@ -80,7 +80,7 @@ namespace udpft
         /*************/
 
         uint32_t chunkIndex;                // for sending or writing a file chunk
-        clock_t disconnectTime;
+        chrono::steady_clock::time_point disconnectTime;
         
         
         inline void calculateFileCRC(ifstream& ifs, uint32_t& crc);
@@ -89,17 +89,18 @@ namespace udpft
             uint32_t id, const void* content, size_t size);
         void packMetaData(unsigned char packet[PacketSize]);
         void readChunk(unsigned char packet[PacketSize]);
-        void storeMetadata();
+        void storeMetadata(); // for receiver 
         void writeChunk();
+
     public:
 
         FileTeleporter();
         ~FileTeleporter();
-        int Initialize(const string& filePath, bool isSender);
         void Close();
-        void LoadPacket(unsigned char packet[PacketSize]);
         string GetFileName() const;
         State GetState() const;
+        bool Initialize(const string& filePath, bool isSender);
+        void LoadPacket(unsigned char packet[PacketSize]);
         void ProcessPacket(unsigned char packet[PacketSize]);
         void Update();
 
@@ -114,7 +115,7 @@ namespace udpft
         // If the checksum doesn’t match, report an error and request the file again.
         // save the file to disk
 
-            // serialize the metadata
+        // serialize the metadata
 
     };
 }

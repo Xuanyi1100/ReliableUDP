@@ -27,9 +27,19 @@ void FileTeleporter::Close()
 	}
 	ackOfChunks.clear();
 	chunkReceived.clear();
+	if(sender) state = CLOSED;
 }
+string FileTeleporter::GetFileName() const
+{
+	return fileName;
+}
+State FileTeleporter::GetState() const
+{
+	return state;
+}
+
 // return 0 
-int FileTeleporter::Initialize(const string& filePath, bool isSender)
+bool FileTeleporter::Initialize(const string& filePath, bool isSender)
 {
 	sender = isSender;
 	if (sender)
@@ -39,21 +49,21 @@ int FileTeleporter::Initialize(const string& filePath, bool isSender)
 		if (fileName.length() > MaxFileNameLength - 1)
 		{
 			cerr << "Error: File name out of length limit: " << filePath << endl;
-			return -1;
+			return false;
 		}
 		// open the file 
 		inputFile.open(filePath, ios::binary | ios::ate);
 		if (!inputFile)
 		{
 			cerr << "Error opening file for reading: " << filePath << endl;
-			return -1;
+			return false;
 		}
 
 		fileSize = inputFile.tellg();
-		totalChunks = (fileSize + 255) / 256;
+		totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
 		// Calculate CRC32 of the file
 		inputFile.seekg(0, ios::beg);
-		calculateFileCRC(inputFile,crc);
+		calculateFileCRC(inputFile, crc);
 		state = WAVING;
 	}
 	else // receiver 
@@ -67,12 +77,12 @@ int FileTeleporter::Initialize(const string& filePath, bool isSender)
 
 		state = LISTENING;
 	}
-	return 0;
+	return true;
 }
 
 void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 {
-	if (sender) 
+	if (sender)
 	{
 		switch (state) //
 		{
@@ -80,7 +90,7 @@ void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 			// MDID
 			packMetaData(packet);
 			break;
-		case SENDING:	
+		case SENDING:
 			if (inputFile.eof())
 			{
 				// ENDID 
@@ -129,72 +139,12 @@ void FileTeleporter::LoadPacket(unsigned char packet[PacketSize])
 		}
 	}
 }
-/*
-* copy metadata to a Message with ID 0.
-* Pack the Message into the packet.
-*/
-void FileTeleporter::packMetaData(unsigned char packet[PacketSize])
-{
-	// Prepare metadata
-	FileMetadata metadata = {};
-	strncpy(metadata.fileName, fileName.c_str(), MaxFileNameLength - 1);
-	metadata.fileName[MaxFileNameLength - 1] = '\0';
-	metadata.fileSize = fileSize;
-	metadata.totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
-	metadata.crc32 = crc;
-
-	packMessage(packet, MDID, &metadata,sizeof(metadata));
-}
-
-void FileTeleporter::readChunk(unsigned char packet[PacketSize])
-{
-	if (!inputFile.is_open())
-	{
-		cerr << "Error file not open: " << fileName << endl;
-		state = CRACKED;
-		return;
-	}	
-	char buffer[FileDataChunkSize];
-	inputFile.read(buffer, FileDataChunkSize);
-	if (inputFile)
-	{
-		// handle the last file chunk.
-		//size_t bytesRead = inputFile.gcount();
-		//if (bytesRead > 0) {
-		//	std::cout << " read last " << bytesRead << " bytes" << std::endl;
-		//}
-		// the last byte represents the number of valid bytes in the last chunk.
-		memset(fc.data, 0, FileDataChunkSize);
-		memcpy(fc.data, buffer, FileDataChunkSize);
-		fc.chunkIndex = chunkIndex;
-		packMessage(packet, FCID, &fc, sizeof(fc));
-	}
-	if (inputFile.eof())
-	{
-		cout << "Reached end of file after reading" << endl;
-	}
-	if (!inputFile.good())
-	{
-		cerr << "Error reading file Chunk: " << fileName << endl;
-		state = CRACKED;
-	}
-}
-
-string FileTeleporter::GetFileName() const
-{
-	return fileName;
-}
-State FileTeleporter::GetState() const
-{
-	return state; 
-}
-
-
 void FileTeleporter::ProcessPacket(unsigned char packet[PacketSize])
 {
 	memset(&rcMs, 0, sizeof(rcMs));
 	memcpy(&rcMs, packet, sizeof(rcMs));
 }
+
 // call update after received a new message
 void FileTeleporter::Update()
 {
@@ -203,8 +153,9 @@ void FileTeleporter::Update()
 	if (state = DISCONNECTING)
 	{
 		// back to ready after being in disconnecting state for 1s
-		double duration = double(clock() - disconnectTime) / CLOCKS_PER_SEC;
-		if (duration > 1)
+		double duration = chrono::duration<double, milli>(
+			chrono::steady_clock::now() - disconnectTime).count();
+		if (duration > DISCONNECT_DURATION)
 		{
 			Initialize("default", false);
 		}
@@ -261,11 +212,11 @@ void FileTeleporter::Update()
 			else
 			{
 				state = DISCONNECTING;
-				// record current time 
-				disconnectTime = clock();
+				// record current time
+				disconnectTime = chrono::high_resolution_clock::now();
 			}
 		}
-	/********************* File SENDER ***************/
+		/********************* File SENDER ***************/
 	case OKID:
 		if (state == WAVING)
 		{
@@ -304,7 +255,7 @@ void FileTeleporter::calculateFileCRC(ifstream& ifs, uint32_t& crc)
 	while (ifs.good())
 	{
 		ifs.read(data, FileDataChunkSize);
-		crc = CRC::Calculate(data, FileDataChunkSize, CRC::CRC_32(), crc);
+		crc = CRC::Calculate(data, ifs.gcount(), CRC::CRC_32(), crc);
 	}
 }
 void FileTeleporter::openFileForWriting()
@@ -326,6 +277,57 @@ void FileTeleporter::packMessage(unsigned char packet[PacketSize],
 	memset(packet, 0, PacketSize);
 	memcpy(packet, &ms, sizeof(ms));
 }
+/*
+* copy metadata to a Message with ID 0.
+* Pack the Message into the packet.
+*/
+void FileTeleporter::packMetaData(unsigned char packet[PacketSize])
+{
+	// Prepare metadata
+	FileMetadata metadata = {};
+	strncpy(metadata.fileName, fileName.c_str(), MaxFileNameLength - 1);
+	metadata.fileName[MaxFileNameLength - 1] = '\0';
+	metadata.fileSize = fileSize;
+	metadata.totalChunks = (fileSize + FileDataChunkSize - 1) / FileDataChunkSize;
+	metadata.crc32 = crc;
+
+	packMessage(packet, MDID, &metadata, sizeof(metadata));
+}
+
+void FileTeleporter::readChunk(unsigned char packet[PacketSize])
+{
+	if (!inputFile.is_open())
+	{
+		cerr << "Error file not open: " << fileName << endl;
+		state = CRACKED;
+		return;
+	}
+	char buffer[FileDataChunkSize];
+	inputFile.read(buffer, FileDataChunkSize);
+	if (inputFile)
+	{
+		/******************for test ********************/
+		size_t bytesRead = inputFile.gcount();
+		if (bytesRead < FileDataChunkSize)
+		{
+			std::cout << "Read " << bytesRead << " bytes in the last time" << std::endl;
+		}
+		/***********************/ 
+		memset(fc.data, 0, FileDataChunkSize);
+		memcpy(fc.data, buffer, FileDataChunkSize);
+		fc.chunkIndex = chunkIndex;
+		packMessage(packet, FCID, &fc, sizeof(fc));
+	}
+	if (inputFile.eof())
+	{
+		cout << "Reached end of file after reading" << endl;
+	}
+	if (!inputFile.good())
+	{
+		cerr << "Error reading file Chunk: " << fileName << endl;
+		state = CRACKED;
+	}
+}
 void FileTeleporter::storeMetadata()
 {
 	FileMetadata fm = {};
@@ -345,12 +347,18 @@ void FileTeleporter::writeChunk()
 	memset(&fc, 0, sizeof(fc));
 	memcpy(&fc, rcMs.content, sizeof(fc));
 	chunkIndex = fc.chunkIndex;
+	size_t bytesWrite = FileDataChunkSize;
+	if (chunkIndex == totalChunks - 1)
+	{
+		bytesWrite = fileSize % FileDataChunkSize;
+	}
+
 	// write to file
 	// don't rewrite data having been already written
 	if (!chunkReceived[chunkIndex] && outputFile.good())
 	{
 		outputFile.seekp(chunkIndex * FileDataChunkSize);
-		outputFile.write((char*)fc.data, FileDataChunkSize);
+		outputFile.write((char*)fc.data, bytesWrite);
 		chunkReceived[chunkIndex] = true;
 		// to sent an ack with chunkIndex.
 	}
@@ -360,6 +368,7 @@ void FileTeleporter::writeChunk()
 		state = CRACKED;
 	}
 }
+
 void FileTeleporter::read()
 {
 	// Wait for all acks with timeout
@@ -389,32 +398,30 @@ void FileTeleporter::read()
 	printf("Calculated File CRC: 0x%08X\n", fileCRC);
 
 	fileSent = true;
-}
 
-			if (receivedChunks == receivedMetadata.totalChunks) {
-				// Verify CRC
-				printf("Finalizing transfer with %u/%u chunks received\n",
-					receivedChunks, receivedMetadata.totalChunks);
-				printf("Received file size: %zu bytes\n", receivedFile.size());
-				printf("Original CRC claim: 0x%08X\n", receivedMetadata.crc32);
 
-				uint32_t calculatedCRC = CRC::Calculate(receivedFile.data(),
-					receivedFile.size(), CRC::CRC_32());
-				printf("Server Calculated CRC: 0x%08X\n", calculatedCRC);
+	if (receivedChunks == receivedMetadata.totalChunks) {
+		// Verify CRC
+		printf("Finalizing transfer with %u/%u chunks received\n",
+			receivedChunks, receivedMetadata.totalChunks);
+		printf("Received file size: %zu bytes\n", receivedFile.size());
+		printf("Original CRC claim: 0x%08X\n", receivedMetadata.crc32);
 
-				if (calculatedCRC == receivedMetadata.crc32) {
-					std::ofstream outFile(receivedMetadata.fileName, std::ios::binary);
-					outFile.write(reinterpret_cast<char*>(receivedFile.data()),
-						receivedFile.size());
-					printf("File received and verified successfully!\n");
-				}
-				else {
-					printf("ERROR: File verification failed!\n");
-				}
-			}
+		uint32_t calculatedCRC = CRC::Calculate(receivedFile.data(),
+			receivedFile.size(), CRC::CRC_32());
+		printf("Server Calculated CRC: 0x%08X\n", calculatedCRC);
 
-			printf("Received chunk %u/%u (%zu bytes)\n",
-				chunk.chunkIndex + 1, receivedMetadata.totalChunks, copySize);
+		if (calculatedCRC == receivedMetadata.crc32) {
+			std::ofstream outFile(receivedMetadata.fileName, std::ios::binary);
+			outFile.write(reinterpret_cast<char*>(receivedFile.data()),
+				receivedFile.size());
+			printf("File received and verified successfully!\n");
+		}
+		else {
+			printf("ERROR: File verification failed!\n");
 		}
 	}
+
+	printf("Received chunk %u/%u (%zu bytes)\n",
+		chunk.chunkIndex + 1, receivedMetadata.totalChunks, copySize);
 }
