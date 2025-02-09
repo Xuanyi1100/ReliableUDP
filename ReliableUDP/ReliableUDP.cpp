@@ -123,7 +123,7 @@ private:
 int main(int argc, char* argv[])
 {
 
-
+	bool faultSimulation = false;
 	enum Mode
 	{
 		Client,
@@ -150,7 +150,7 @@ int main(int argc, char* argv[])
 		else
 		{
 			printf("client mode usage:\n"
-				"%s <ip:port> [file] \n", argv[0]);
+				"%s <ip> [file] \n", argv[0]);
 			return 1;
 		}
 
@@ -160,6 +160,21 @@ int main(int argc, char* argv[])
 				printf("Specified file doesn't exist.\n");
 				return 1;
 		}
+		if (argc == 4)
+		{
+			string wild = argv[3];
+			if (wild == "999")
+			{
+				faultSimulation = true;
+			}
+		}
+
+	}
+	else if (argc == 2)
+	{
+		printf("client mode usage:\n"
+			"%s <ip> [file] \n", argv[0]);
+		return 1;
 	}
 
 	// initialize
@@ -201,7 +216,7 @@ int main(int argc, char* argv[])
 
 	while (true)
 	{
-
+		// update flow control
 
 		if (connection.IsConnected())
 			flowControl.Update(DeltaTime, connection.GetReliabilitySystem().GetRoundTripTime() * 1000.0f);
@@ -242,7 +257,17 @@ int main(int argc, char* argv[])
 		while (sendAccumulator > 1.0f / sendRate)
 		{
 			unsigned char packet[PacketSize];
+			memset(packet, 0, sizeof(packet));
+
 			ftp.LoadPacket(packet);
+
+			// ** Randomly flip data in a packet **
+			if (faultSimulation && rand() % 20 == 0)
+			{
+				packet[255] ^= 0xFF;
+				printf("Simulated corruption in chunk\n");
+			}
+
 			connection.SendPacket(packet, sizeof(packet));
 			sendAccumulator -= 1.0f / sendRate;
 		}

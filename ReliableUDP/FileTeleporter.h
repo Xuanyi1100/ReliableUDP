@@ -10,7 +10,7 @@ using namespace std;
 
 namespace udpft
 {
-    const int PacketSize = 1400;
+    const int PacketSize = 256;
     const int MaxFileNameLength = 128;
     const int ContentSize = PacketSize - sizeof(uint32_t);
     const int FileDataChunkSize = PacketSize - 2 * sizeof(uint32_t);

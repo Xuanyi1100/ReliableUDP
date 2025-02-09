@@ -239,7 +239,7 @@ void FileTeleporter::Update()
 				// not equal to CRC, be prepare for receiving the file from the head.
 				chunkReceived.assign(totalChunks, false);				
 				fileData.assign(fileSize, 0);
-
+				chunkIndex = 0;
 				state = READY;
 				std::cout << " Ready for retransmission" << endl;
 			}
@@ -293,6 +293,8 @@ void FileTeleporter::Update()
 		{
 			chunkIndex = 0;
 			ackOfChunks.assign(totalChunks,false);
+			memset(&fc, 0, sizeof(fc));
+			memset(&rcMs, 0, sizeof(rcMs));
 		}
 		break;
 	default:
@@ -358,15 +360,19 @@ void FileTeleporter::packMetaData(unsigned char packet[PacketSize])
 
 void FileTeleporter::readChunk()
 {
-	fc.chunkIndex = chunkIndex;
-	size_t offset = chunkIndex * FileDataChunkSize;
-	size_t chunkSize = (((FileDataChunkSize) < (fileSize - offset))
-		? (FileDataChunkSize) : (fileSize - offset));
-	// Copy from memory buffer instead of re-reading file
-	memcpy(fc.data, fileData.data() + offset, chunkSize);
-	// Fill remaining space with zeros if needed
-	if (chunkSize < FileDataChunkSize) {
-		memset(fc.data + chunkSize, 0, FileDataChunkSize - chunkSize);
+	if (chunkIndex < totalChunks)
+	{
+		fc.chunkIndex = chunkIndex;
+		size_t offset = chunkIndex * FileDataChunkSize;
+		size_t chunkSize = (((FileDataChunkSize) < (fileSize - offset))
+			? (FileDataChunkSize) : (fileSize - offset));
+		// Copy from memory buffer instead of re-reading file
+		memcpy(fc.data, fileData.data() + offset, chunkSize);
+		// Fill remaining space with zeros if needed
+		if (chunkSize < FileDataChunkSize)
+		{
+			memset(fc.data + chunkSize, 0, FileDataChunkSize - chunkSize);
+		}
 	}
 }
 void FileTeleporter::storeMetadata()
